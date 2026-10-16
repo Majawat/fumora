@@ -22,6 +22,7 @@ docker compose up --build
 - Field names follow Metron's API. A TPB is its own series (Metron series_type), linked via `reprint`.
 - All Metron calls go through the single `app.state.metron_limiter` (burst 20, 5,000/day).
 - Secrets live in the `setting` table and are never rendered back to the browser or logged.
+- TRaSH Guides paths: one `/data` mount shared with the download clients; library default `/data/media/comics` (configurable). Import = hardlink (torrents) or rename/move (usenet), never copy across mounts.
 - Never delete library files; never chown anything outside `/config`.
 - Tests stay offline (respx mocks). `tests/test_migrations.py` fails if models and migrations drift.
 - Files get ComicInfo.xml 2.1 + MetronInfo.xml 1.1, merged — never drop fields we don't own (e.g. `<Tags>`).

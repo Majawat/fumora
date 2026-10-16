@@ -11,6 +11,8 @@ services:
       - UMASK=0002
     volumes:
       - ./data/config:/config
-      # - /mnt/user/data/media/Comics:/comics
-      # - /mnt/user/data/downloads:/downloads
+      # TRaSH layout: one /data share holding usenet/, torrents/ and media/,
+      # mounted at the same path the download clients use, so imports are
+      # hardlinks (torrents keep seeding) or instant moves (usenet).
+      # - /mnt/user/data:/data
     restart: unless-stopped

@@ -26,6 +26,15 @@ login on the Settings page.
 | `FUMORA_PORT` | 8792 | Web port |
 | `FUMORA_CONFIG_DIR` | /config | Database and session key |
 
+### Paths (TRaSH Guides layout)
+
+Mount your whole data share once, at `/data`, exactly as Sonarr, SABnzbd and
+qBittorrent see it (`/mnt/user/data:/data` on Unraid). Fumora then sees
+download folders (`/data/usenet/...`, `/data/torrents/...`) and the library
+(`/data/media/comics` by default, changeable in Settings) on one filesystem,
+so imports are hardlinks for torrents and instant moves for usenet, never
+slow copies. Separate `/comics` and `/downloads` mounts would break that.
+
 ## Develop
 
 ```bash
