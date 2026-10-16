@@ -67,6 +67,8 @@ def upsert_mylar(
             stats.series_new += 1
         elif series.path is None:
             series.path = ms.path
+        series.mylar_name = ms.name
+        series.mylar_year = ms.year
 
         by_cv = {i.cv_id: i for i in series.issues if i.cv_id is not None}
         by_number = {normalize_number(i.number): i for i in series.issues}
@@ -266,7 +268,80 @@ async def match_series(db: Session, client: MetronClient, series: Series) -> str
     detail = await client.series(metron_id)
     apply_metron_series(db, series, detail)
     series.match_status, series.match_note, series.suggested_metron_id = "matched", note, None
+    if series.match_note and "accepted" in series.match_note:
+        series.confirmed_by = "user"
+    else:
+        decide_confirmation(series)
     return series.match_status
+
+
+def names_agree(series: Series) -> bool:
+    """Mylar's name/year and Metron's name/year describe the same series."""
+    if series.mylar_name is None:
+        return True
+    same_name = _name_key(series.mylar_name) == _name_key(series.name)
+    years = (series.mylar_year, series.year_began)
+    same_year = None in years or abs(years[0] - years[1]) <= 1
+    return same_name and same_year
+
+
+def decide_confirmation(series: Series) -> None:
+    """Auto-confirm a ComicVine-id match whose name and year agree with Mylar's;
+    otherwise leave it for the user and say why."""
+    if series.confirmed_by is not None or series.match_status != "matched":
+        return
+    if names_agree(series):
+        series.confirmed_by = "auto"
+    else:
+        mylar = series.mylar_name + (f" ({series.mylar_year})" if series.mylar_year else "")
+        metron = series.name + (f" ({series.year_began})" if series.year_began else "")
+        series.match_note = (
+            f"Metron's name differs from Mylar's: '{mylar}' vs '{metron}'. Confirm or pick another."
+        )
+
+
+def review_confirmations(db: Session) -> int:
+    """Settle confirmation for matched series that have none yet (e.g. matched
+    before confirmation existed). Returns how many still need the user."""
+    for series in db.scalars(
+        select(Series).where(Series.match_status == "matched", Series.confirmed_by.is_(None))
+    ):
+        note = series.match_note or ""
+        if "by hand" in note or "accepted" in note:
+            series.confirmed_by = "user"
+        else:
+            decide_confirmation(series)
+    db.flush()
+    return db.scalar(
+        select(func.count())
+        .select_from(Series)
+        .where(Series.match_status == "matched", Series.confirmed_by.is_(None))
+    )
+
+
+def unmatch_series(db: Session, series: Series, note: str) -> None:
+    """Forget a Metron match: back to Mylar's name/year, drop Metron-only issues
+    without files, clear Metron ids."""
+    for issue in list(series.issues):
+        if issue.match_status == "new" and not issue.files:
+            series.issues.remove(issue)
+            db.delete(issue)
+        else:
+            issue.metron_id = None
+            issue.match_status = None
+            issue.metron_detail = None
+            issue.detail_fetched = None
+    if series.mylar_name:
+        series.name = series.mylar_name
+        series.year_began = series.mylar_year
+    series.metron_id = None
+    series.source = "cv"
+    series.confirmed_by = None
+    series.issues_synced = None
+    series.suggested_metron_id = None
+    series.match_status = "not_found"
+    series.match_note = note
+    db.flush()
 
 
 async def sync_series_issues(db: Session, client: MetronClient, series: Series) -> dict[str, int]:
@@ -336,6 +411,7 @@ def import_report(db: Session) -> dict:
         "series_not_found": count(Series, Series.match_status == "not_found"),
         "series_pending": count(Series, Series.match_status.in_(("pending", "accepted"))),
         "series_suggested": count(Series, Series.suggested_metron_id.is_not(None)),
+        "series_unconfirmed": count(Series, Series.match_status == "matched", Series.confirmed_by.is_(None)),
         "issues_total": count(Issue),
         "issues_matched": count(Issue, Issue.match_status == "matched"),
         "issues_unmatched": count(Issue, Issue.match_status == "unmatched"),

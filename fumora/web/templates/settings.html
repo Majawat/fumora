@@ -16,6 +16,10 @@
       <input name="{{ d.key }}" type="password" autocomplete="off"
              placeholder="{% if item.is_set %}Saved — leave blank to keep{% else %}Not set{% endif %}">
       {% if item.is_set %}<span class="inline"><input type="checkbox" name="{{ d.key }}.clear" value="1"> Clear saved value</span>{% endif %}
+      {% elif d.choices %}
+      <select name="{{ d.key }}">
+        {% for value, label in d.choices %}<option value="{{ value }}" {% if item.value == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
       {% else %}
       <input name="{{ d.key }}" value="{{ item.value }}">
       {% endif %}

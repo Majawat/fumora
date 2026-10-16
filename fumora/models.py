@@ -117,6 +117,13 @@ class Series(Base):
     # A Metron series found by name and year when the ComicVine id found nothing;
     # it is only used once the user accepts it.
     suggested_metron_id: Mapped[int | None]
+    # Mylar's own name and start year, kept so a Metron match can be compared
+    # with what the user had (Metron's values overwrite name/year_began).
+    mylar_name: Mapped[str | None] = mapped_column(String(255))
+    mylar_year: Mapped[int | None]
+    # Who confirmed the Metron match: 'auto' (ComicVine id + same name and year)
+    # or 'user'. Fumora never writes files of a series whose match is unconfirmed.
+    confirmed_by: Mapped[str | None] = mapped_column(String(10))
     # When our issues were last paired with Metron's issue list.
     issues_synced: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -160,6 +167,9 @@ class Issue(Base):
     last_synced: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Metron matching: matched, unmatched (ours only), new (Metron only, added by a sync)
     match_status: Mapped[str | None] = mapped_column(String(20))
+    # Full Metron issue record (credits, characters, ...), cached for tagging.
+    metron_detail: Mapped[dict | None] = mapped_column(JSON)
+    detail_fetched: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     series: Mapped[Series] = relationship(back_populates="issues")
     files: Mapped[list["File"]] = relationship(back_populates="issue")
@@ -188,6 +198,8 @@ class File(Base):
     size: Mapped[int | None]
     crc: Mapped[str | None] = mapped_column(String(16))
     tagged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Last dry-run result: {"fields": {name: [old, new]}, "error": str | None}
+    tag_preview: Mapped[dict | None] = mapped_column(JSON)
     added: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     issue: Mapped[Issue | None] = relationship(back_populates="files")

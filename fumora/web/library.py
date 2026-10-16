@@ -8,11 +8,13 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, selectinload
 
-from .. import settings_store
+from .. import naming, settings_store
 from ..import_job import KIND as MYLAR_IMPORT
-from ..importer import apply_metron_series, import_report, log, sync_series_issues
+from ..importer import apply_metron_series, import_report, log, sync_series_issues, unmatch_series
+from ..library_jobs import ORGANIZE, RETAG, SCAN, naming_settings, shared_folders
 from ..metron import MetronError
-from ..models import File, Issue, Series
+from ..models import File, Issue, Series, Tag
+from ..ratings import METRON_RATINGS, series_rating, strictest
 
 MATCH_LABELS = {
     "matched": "Matched",
@@ -59,8 +61,31 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
             request, "series_list.html", {"rows": rows, "match": match, "q": q or ""}
         )
 
+    def detail_context(db: Session, series: Series, error: str | None = None, rename: bool = False) -> dict:
+        issues = sorted(series.issues, key=lambda i: (i.sort_number is None, i.sort_number or 0, i.number))
+        jobs = {kind: app.state.jobs.latest(kind) for kind in (SCAN, RETAG, ORGANIZE)}
+        running = any(j and j.state in ("queued", "running") for j in jobs.values())
+        plan = None
+        if rename:
+            plan = naming.plan_series(
+                series, shared_folder=series.path in shared_folders(db), **naming_settings(db)
+            )
+        return {
+            "s": series,
+            "issues": issues,
+            "error": error,
+            "jobs": jobs,
+            "running": running,
+            "ratings": METRON_RATINGS,
+            "calculated_rating": strictest(i.rating for i in series.issues),
+            "effective_rating": series_rating(series),
+            "tag_names": ", ".join(sorted(t.name for t in series.tags)),
+            "plan": plan,
+            "writable": series.match_status != "matched" or series.confirmed_by is not None,
+        }
+
     @app.get("/series/{series_id}", response_class=HTMLResponse)
-    def series_detail(request: Request, series_id: int, db: Session = Depends(get_db)):
+    def series_detail(request: Request, series_id: int, rename: bool = False, db: Session = Depends(get_db)):
         series = db.scalar(
             select(Series)
             .where(Series.id == series_id)
@@ -68,13 +93,103 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
         )
         if series is None:
             raise HTTPException(404)
-        issues = sorted(
-            series.issues,
-            key=lambda i: (i.sort_number is None, i.sort_number or 0, i.number),
-        )
         return templates.TemplateResponse(
-            request, "series_detail.html", {"s": series, "issues": issues, "error": None}
+            request, "series_detail.html", detail_context(db, series, rename=rename)
         )
+
+    def _get_series(db: Session, series_id: int) -> Series:
+        series = db.get(Series, series_id)
+        if series is None:
+            raise HTTPException(404)
+        return series
+
+    @app.post("/series/{series_id}/confirm")
+    def series_confirm(series_id: int, db: Session = Depends(get_db)):
+        series = _get_series(db, series_id)
+        if series.match_status == "matched":
+            series.confirmed_by = "user"
+            series.match_note = None
+            log(db, f"Match confirmed for '{series.name}'", series_id=series.id)
+            db.commit()
+        return RedirectResponse(f"/series/{series_id}", status_code=303)
+
+    @app.post("/series/{series_id}/not-on-metron")
+    def series_not_on_metron(series_id: int, db: Session = Depends(get_db)):
+        series = _get_series(db, series_id)
+        unmatch_series(db, series, "Marked by hand as not on Metron")
+        log(db, f"'{series.name}' marked as not on Metron", series_id=series.id)
+        db.commit()
+        return RedirectResponse(f"/series/{series_id}", status_code=303)
+
+    @app.post("/series/{series_id}/edit")
+    def series_edit(
+        series_id: int,
+        age_rating: str = Form(""),
+        tags: str = Form(""),
+        db: Session = Depends(get_db),
+    ):
+        series = _get_series(db, series_id)
+        series.age_rating_override = age_rating if age_rating in METRON_RATINGS else None
+        wanted = []
+        for name in (t.strip() for t in tags.split(",")):
+            if name and name.lower() not in {w.lower() for w in wanted}:
+                wanted.append(name[:100])
+        new_tags = []
+        for name in wanted:
+            tag = db.scalar(select(Tag).where(func.lower(Tag.name) == name.lower()))
+            if tag is None:
+                tag = Tag(name=name)
+                db.add(tag)
+            new_tags.append(tag)
+        series.tags = new_tags
+        db.commit()
+        return RedirectResponse(f"/series/{series_id}", status_code=303)
+
+    def _start(kind: str, params: dict) -> None:
+        active = app.state.jobs.active(kind)
+        if active is not None:
+            raise HTTPException(409, f"A {kind} job is already running; try again when it finishes.")
+        app.state.jobs.start(kind, params)
+
+    @app.post("/series/{series_id}/scan")
+    async def series_scan(series_id: int, db: Session = Depends(get_db)):
+        _get_series(db, series_id)
+        _start(SCAN, {"series_ids": [series_id]})
+        return RedirectResponse(f"/series/{series_id}", status_code=303)
+
+    @app.post("/series/{series_id}/retag")
+    async def series_retag(series_id: int, write: bool = Form(False), db: Session = Depends(get_db)):
+        series = _get_series(db, series_id)
+        if write and series.match_status == "matched" and series.confirmed_by is None:
+            raise HTTPException(400, "Confirm the Metron match before writing tags.")
+        _start(RETAG, {"series_ids": [series_id], "dry_run": not write})
+        return RedirectResponse(f"/series/{series_id}", status_code=303)
+
+    @app.post("/series/{series_id}/organize")
+    async def series_organize(series_id: int, db: Session = Depends(get_db)):
+        series = _get_series(db, series_id)
+        if series.match_status == "matched" and series.confirmed_by is None:
+            raise HTTPException(400, "Confirm the Metron match before renaming.")
+        _start(ORGANIZE, {"series_ids": [series_id]})
+        return RedirectResponse(f"/series/{series_id}", status_code=303)
+
+    @app.post("/library/scan")
+    async def library_scan():
+        _start(SCAN, {})
+        return RedirectResponse("/import", status_code=303)
+
+    @app.post("/import/confirm-all")
+    def import_confirm_all(db: Session = Depends(get_db)):
+        n = 0
+        for series in db.scalars(
+            select(Series).where(Series.match_status == "matched", Series.confirmed_by.is_(None))
+        ):
+            series.confirmed_by = "user"
+            series.match_note = None
+            n += 1
+        log(db, f"Confirmed {n} matches in bulk")
+        db.commit()
+        return RedirectResponse("/import", status_code=303)
 
     @app.post("/series/{series_id}/metron", response_class=HTMLResponse)
     async def series_set_metron(
@@ -99,6 +214,7 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
                     apply_metron_series(db, series, detail)
                     series.match_status, series.match_note = "matched", "Matched by hand"
                     series.suggested_metron_id = None
+                    series.confirmed_by = "user"
                     # Undo the previous match: drop issues it added (if they have no
                     # files) and forget the Metron ids it assigned.
                     for issue in list(series.issues):
@@ -108,6 +224,7 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
                         else:
                             issue.metron_id = None
                             issue.match_status = None
+                            issue.metron_detail = None
                     db.flush()
                     await sync_series_issues(db, client, series)
                     series.issues_synced = datetime.now(UTC)
@@ -118,14 +235,8 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
                 error = str(exc)
         if error:
             series = db.get(Series, series_id)
-            issues = sorted(
-                series.issues, key=lambda i: (i.sort_number is None, i.sort_number or 0, i.number)
-            )
             return templates.TemplateResponse(
-                request,
-                "series_detail.html",
-                {"s": series, "issues": issues, "error": error},
-                status_code=400,
+                request, "series_detail.html", detail_context(db, series, error=error), status_code=400
             )
         return RedirectResponse(f"/series/{series_id}", status_code=303)
 
@@ -148,6 +259,12 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
             **status_context(db),
             "review": _series_rows(db, Series.match_status.in_(("review", "not_found", "accepted"))),
             "with_unmatched": _series_rows(db, Series.match_status == "matched", having_unmatched=True),
+            "unconfirmed": db.scalars(
+                select(Series)
+                .where(Series.match_status == "matched", Series.confirmed_by.is_(None))
+                .order_by(Series.name)
+            ).all(),
+            "scan_job": app.state.jobs.latest(SCAN),
             "mylar_path": settings_store.get(db, "mylar.db_path"),
         }
 
