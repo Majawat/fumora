@@ -120,6 +120,19 @@ def _split(value: str | None) -> list[str]:
     return [p.strip() for p in (value or "").split(",") if p.strip()]
 
 
+_INT_FIELDS = {"Count", "Volume", "AlternateCount", "Year", "Month", "Day", "PageCount"}
+
+
+def _same(name: str, old: str | None, new: str) -> bool:
+    old = (old or "").strip()
+    if name in _INT_FIELDS:
+        try:
+            return int(old) == int(new)
+        except ValueError:
+            return False
+    return old == new
+
+
 def comicinfo_fields(meta: IssueMeta) -> dict[str, str]:
     """The ComicInfo fields Fumora sets, as text. Missing values are left out."""
     credit_fields: dict[str, list[str]] = {}
@@ -137,7 +150,7 @@ def comicinfo_fields(meta: IssueMeta) -> dict[str, str]:
         "Notes": meta.notes,
         "Year": str(meta.cover_date.year) if meta.cover_date else None,
         "Month": str(meta.cover_date.month) if meta.cover_date else None,
-        "Day": str(meta.cover_date.day) if meta.cover_date else None,
+        # No <Day>: Metron cover dates are month-precise (always the 1st).
         **{f: _join(names) for f, names in credit_fields.items()},
         "Publisher": meta.publisher,
         "Imprint": meta.imprint,
@@ -184,7 +197,7 @@ def merge_comicinfo(existing: bytes | None, meta: IssueMeta) -> tuple[bytes, dic
     changes: dict[str, tuple] = {}
     for name, value in new.items():
         old = children[name].text if name in children else None
-        if (old or "").strip() != value:
+        if not _same(name, old, value):
             changes[name] = (old, value)
         el = children.get(name)
         if el is None:

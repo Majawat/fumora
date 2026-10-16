@@ -122,4 +122,12 @@ def test_age_rating_and_tags_flow_from_series(app):
         # The manual series rating beats Metron's issue rating.
         assert f["AgeRating"] == "MA15+"
         assert issue_meta(i).tags == ["Explicit"]
-        assert (f["Year"], f["Month"], f["Day"]) == ("2000", "5", "1")
+        assert (f["Year"], f["Month"]) == ("2000", "5") and "Day" not in f
+
+
+def test_number_formatting_is_not_a_change(app):
+    meta = meta_from_fixture(app, 186450)
+    first, _ = merge_comicinfo(None, meta)
+    padded = first.replace(b"<Month>9</Month>", b"<Month>09</Month>")
+    assert b"<Month>09</Month>" in padded
+    assert "Month" not in merge_comicinfo(padded, meta)[1]
