@@ -24,11 +24,21 @@ class SettingDef:
 SETTINGS: list[SettingDef] = [
     SettingDef("metron.username", "Username", "Metron"),
     SettingDef("metron.password", "Password", "Metron", secret=True),
-    SettingDef("comicvine.api_key", "API key", "ComicVine", secret=True,
-               help="Fallback only, for series Metron does not have."),
-    SettingDef("library.path", "Library folder", "Library", default="/data/media/comics",
-               help="Where series folders live, as Fumora sees it. Mount one shared /data "
-                    "(TRaSH layout) so imports can hardlink or move instantly."),
+    SettingDef(
+        "comicvine.api_key",
+        "API key",
+        "ComicVine",
+        secret=True,
+        help="Fallback only, for series Metron does not have.",
+    ),
+    SettingDef(
+        "library.path",
+        "Library folder",
+        "Library",
+        default="/data/media/comics",
+        help="Where series folders live, as Fumora sees it. Mount one shared /data "
+        "(TRaSH layout) so imports can hardlink or move instantly.",
+    ),
 ]
 
 SETTINGS_BY_KEY = {s.key: s for s in SETTINGS}

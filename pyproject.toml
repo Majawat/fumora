@@ -2,6 +2,8 @@
 name = "fumora"
 version = "0.1.0"
 description = "Metron-first comic manager: track, download, tag and rename comics."
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
@@ -15,7 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "respx>=0.22"]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "respx>=0.22", "ruff>=0.8"]
 
 [build-system]
 requires = ["setuptools>=75"]
@@ -26,6 +28,17 @@ include = ["fumora*"]
 
 [tool.setuptools.package-data]
 fumora = ["web/templates/*.html", "web/static/*", "migrations/*.py", "migrations/script.py.mako", "migrations/versions/*.py"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = ["fumora/migrations/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Form"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

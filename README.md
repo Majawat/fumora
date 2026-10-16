@@ -48,3 +48,7 @@ Schema changes: edit `fumora/models.py`, then
 migrations on startup.
 
 Design: see [docs/DESIGN.md](docs/DESIGN.md).
+
+## Licence
+
+GPL-3.0. See [LICENSE](LICENSE).

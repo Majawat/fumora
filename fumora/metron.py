@@ -180,6 +180,4 @@ class MetronClient:
         return self._paged("series/", {"modified_gt": since_iso})
 
     def releases_between(self, start: str, end: str) -> AsyncIterator[dict]:
-        return self._paged(
-            "issue/", {"store_date_range_after": start, "store_date_range_before": end}
-        )
+        return self._paged("issue/", {"store_date_range_after": start, "store_date_range_before": end})

@@ -28,14 +28,17 @@ def test_setup_then_login_flow(logged_in):
     assert logged_in.get("/", follow_redirects=False).headers["location"] == "/login"
     r = logged_in.post("/login", data={"username": "admin", "password": "wrong"})
     assert r.status_code == 401
-    r = logged_in.post("/login", data={"username": "admin", "password": "correct horse"}, follow_redirects=False)
+    r = logged_in.post(
+        "/login", data={"username": "admin", "password": "correct horse"}, follow_redirects=False
+    )
     assert r.status_code == 303
     assert logged_in.get("/").status_code == 200
 
 
 def test_setup_closed_after_first_user(logged_in):
     r = logged_in.post(
-        "/setup", data={"username": "x", "password": "another one", "password2": "another one"},
+        "/setup",
+        data={"username": "x", "password": "another one", "password2": "another one"},
         follow_redirects=False,
     )
     assert r.headers["location"] == "/login"

@@ -11,6 +11,7 @@ Design truth: the Claude Doc linked in `docs/DESIGN.md`. Read it first.
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/pytest                                   # offline; no network calls
+.venv/bin/ruff check . && .venv/bin/ruff format --check .   # CI runs both
 FUMORA_CONFIG_DIR=./data/config .venv/bin/uvicorn fumora.asgi:app --reload --port 8792
 .venv/bin/alembic revision --autogenerate -m "..."  # after editing models.py
 docker compose up --build

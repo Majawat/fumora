@@ -96,9 +96,7 @@ def create_app(config: Config | None = None) -> FastAPI:
         elif password != password2:
             error = "Passwords do not match."
         if error:
-            return templates.TemplateResponse(
-                request, "setup.html", {"error": error}, status_code=400
-            )
+            return templates.TemplateResponse(request, "setup.html", {"error": error}, status_code=400)
         user = User(username=username.strip(), password_hash=hash_password(password))
         db.add(user)
         db.add(Event(kind="auth", message=f"Admin account '{user.username}' created"))
@@ -140,9 +138,7 @@ def create_app(config: Config | None = None) -> FastAPI:
                 select(func.count()).select_from(Series).where(Series.monitored.is_(True))
             ),
             "issues": db.scalar(select(func.count()).select_from(Issue)),
-            "wanted": db.scalar(
-                select(func.count()).select_from(Issue).where(Issue.status == "Wanted")
-            ),
+            "wanted": db.scalar(select(func.count()).select_from(Issue).where(Issue.status == "Wanted")),
         }
         events = db.scalars(select(Event).order_by(Event.ts.desc()).limit(20)).all()
         metron_ready = settings_store.is_set(db, "metron.username") and settings_store.is_set(
@@ -205,9 +201,7 @@ def create_app(config: Config | None = None) -> FastAPI:
                 ok, message = False, str(exc)
             except Exception as exc:  # network errors
                 ok, message = False, f"Could not reach Metron: {type(exc).__name__}"
-        return templates.TemplateResponse(
-            request, "_test_result.html", {"ok": ok, "message": message}
-        )
+        return templates.TemplateResponse(request, "_test_result.html", {"ok": ok, "message": message})
 
     @app.get("/api/health")
     def health():
