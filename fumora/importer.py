@@ -319,6 +319,21 @@ def review_confirmations(db: Session) -> int:
     )
 
 
+METRON_DERIVED = ("rating", "isbn", "upc", "page_count", "gcd_id")
+
+
+def clear_metron_values(issue: Issue) -> None:
+    """Forget an issue's Metron match and the values that came from it (except
+    ones the user locked), so a wrong match leaves nothing behind."""
+    issue.metron_id = None
+    issue.match_status = None
+    issue.metron_detail = None
+    issue.detail_fetched = None
+    for name in METRON_DERIVED:
+        if name not in (issue.locked_fields or []):
+            setattr(issue, name, None)
+
+
 def unmatch_series(db: Session, series: Series, note: str) -> None:
     """Forget a Metron match: back to Mylar's name/year, drop Metron-only issues
     without files, clear Metron ids."""
@@ -327,10 +342,7 @@ def unmatch_series(db: Session, series: Series, note: str) -> None:
             series.issues.remove(issue)
             db.delete(issue)
         else:
-            issue.metron_id = None
-            issue.match_status = None
-            issue.metron_detail = None
-            issue.detail_fetched = None
+            clear_metron_values(issue)
     if series.mylar_name:
         series.name = series.mylar_name
         series.year_began = series.mylar_year

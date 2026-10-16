@@ -129,6 +129,12 @@ class Series(Base):
 
     publisher: Mapped[Publisher | None] = relationship()
     imprint: Mapped[Imprint | None] = relationship()
+
+    @property
+    def writable(self) -> bool:
+        """Fumora may write this series' files: its Metron match (if any) is confirmed."""
+        return not (self.match_status == "matched" and self.confirmed_by is None)
+
     issues: Mapped[list["Issue"]] = relationship(back_populates="series", cascade="all, delete-orphan")
     tags: Mapped[list[Tag]] = relationship(secondary=series_tag)
 

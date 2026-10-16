@@ -7,7 +7,18 @@ original. If anything fails the original is untouched.
 
 import os
 import zipfile
+import zlib
 from pathlib import Path
+
+# What reading a damaged, encrypted or unusual zip can raise.
+_ZIP_ERRORS = (
+    zipfile.BadZipFile,
+    zipfile.LargeZipFile,
+    zlib.error,
+    RuntimeError,
+    NotImplementedError,
+    EOFError,
+)
 
 COMICINFO = "ComicInfo.xml"
 METRONINFO = "MetronInfo.xml"
@@ -39,7 +50,7 @@ def read_metadata(path: str | Path) -> tuple[bytes | None, bytes | None, int]:
                 1 for i in zf.infolist() if not i.is_dir() and Path(i.filename).suffix.lower() in IMAGE_EXTS
             )
             return (zf.read(ci) if ci else None, zf.read(mi) if mi else None, pages)
-    except (zipfile.BadZipFile, OSError) as exc:
+    except (*_ZIP_ERRORS, OSError) as exc:
         raise ArchiveError(f"Cannot read {Path(path).name}: {exc}") from exc
 
 
@@ -70,14 +81,11 @@ def write_metadata(path: str | Path, files: dict[str, bytes]) -> None:
             if len(check.infolist()) != copied + len(files):
                 raise ArchiveError("Verification failed: entry count differs")
 
-        st = path.stat()
-        os.chmod(tmp, st.st_mode & 0o7777)
-        try:
-            os.chown(tmp, st.st_uid, st.st_gid)
-        except PermissionError:
-            pass  # not allowed to give it away; it keeps our PUID/PGID
+        # Same permissions as before; the owner becomes Fumora's PUID/PGID
+        # (Fumora never chowns library files).
+        os.chmod(tmp, path.stat().st_mode & 0o7777)
         os.replace(tmp, path)
-    except (zipfile.BadZipFile, zipfile.LargeZipFile, OSError, ValueError) as exc:
+    except (*_ZIP_ERRORS, OSError, ValueError) as exc:
         raise ArchiveError(f"Cannot rewrite {path.name}: {exc}") from exc
     finally:
         tmp.unlink(missing_ok=True)

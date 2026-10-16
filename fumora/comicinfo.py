@@ -10,6 +10,11 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import date
 
+# Kept attributes like xsi:nil serialise with their usual prefix; ElementTree
+# declares a namespace only where it is used (no duplicate declarations).
+ET.register_namespace("xsi", "http://www.w3.org/2001/XMLSchema-instance")
+ET.register_namespace("xsd", "http://www.w3.org/2001/XMLSchema")
+
 COMICINFO_ORDER = [
     "Title", "Series", "Number", "Count", "Volume", "AlternateSeries", "AlternateNumber",
     "AlternateCount", "Summary", "Notes", "Year", "Month", "Day", "Writer", "Penciller", "Inker",
@@ -204,14 +209,7 @@ def merge_comicinfo(existing: bytes | None, meta: IssueMeta) -> tuple[bytes, dic
             el = children[name] = ET.Element(name)
         el.text = value
 
-    # The root only ever carries namespace declarations; write the standard pair.
-    out = ET.Element(
-        "ComicInfo",
-        {
-            "xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
-            "xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
-        },
-    )
+    out = ET.Element("ComicInfo")
     for name in COMICINFO_ORDER:
         if name in children:
             out.append(children[name])
@@ -236,8 +234,17 @@ def _resources(parent: ET.Element, wrapper: str, tag: str, items) -> None:
             _sub(w, tag, name, id=rid)
 
 
+METRONINFO_ORDER = [
+    "IDS", "Publisher", "Series", "MangaVolume", "CollectionTitle", "Number", "AlternativeNumber",
+    "Stories", "Summary", "Prices", "CoverDate", "StoreDate", "PageCount", "Notes", "Genres", "Tags",
+    "Arcs", "Characters", "Teams", "Universes", "Locations", "Reprints", "GTIN", "AgeRating",
+    "CommunityRating", "URLs", "Credits", "LastModified",
+]  # fmt: skip
+
+
 def build_metroninfo(meta: IssueMeta, existing: bytes | None = None) -> bytes:
-    """MetronInfo.xml from Fumora's data; <Tags> already in the file are kept."""
+    """MetronInfo.xml: Fumora's elements replace the file's; elements Fumora
+    doesn't produce (Locations, MangaVolume, ...) are kept; <Tags> is a union."""
     file_tags: list[str] = []
     if existing:
         try:
@@ -246,13 +253,13 @@ def build_metroninfo(meta: IssueMeta, existing: bytes | None = None) -> bytes:
         except ET.ParseError:
             pass
 
-    root = ET.Element(
-        "MetronInfo",
-        {
-            "xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
-            "xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
-        },
-    )
+    old_root = None
+    if existing:
+        try:
+            old_root = ET.fromstring(existing)
+        except ET.ParseError:
+            old_root = None
+    root = ET.Element("MetronInfo")
     ids = [("Metron", meta.metron_id), ("Comic Vine", meta.cv_id), ("Grand Comics Database", meta.gcd_id)]
     ids = [(src, v) for src, v in ids if v]
     if ids:
@@ -335,5 +342,16 @@ def build_metroninfo(meta: IssueMeta, existing: bytes | None = None) -> bytes:
                         _sub(rw, "Role", "Other")
     if meta.modified:
         _sub(root, "LastModified", meta.modified)
+
+    if old_root is not None and old_root.tag == "MetronInfo":
+        produced = {child.tag for child in root}
+        for child in old_root:
+            if child.tag not in produced:
+                root.append(child)
+        rank = {name: i for i, name in enumerate(METRONINFO_ORDER)}
+        children = sorted(list(root), key=lambda c: rank.get(c.tag, len(rank)))
+        for c in list(root):
+            root.remove(c)
+        root.extend(children)
     ET.indent(root, space="  ")
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)

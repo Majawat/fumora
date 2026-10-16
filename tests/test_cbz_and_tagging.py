@@ -91,3 +91,55 @@ def test_unconfirmed_match_is_not_written(app, tmp_path):
 def test_cbr_file_reports_error(app, tmp_path):
     db, issue, f = _series_with_file(app, tmp_path, name="a.cbr")
     assert "CBZ only" in tag_file(issue, f, dry_run=True)["error"]
+
+
+def test_write_skips_files_with_nothing_to_change(app, tmp_path):
+    db, issue, f = _series_with_file(app, tmp_path)
+    tag_file(issue, f, dry_run=False)
+    first = f.tagged_at
+    mtime = os.stat(f.path).st_mtime_ns
+    result = tag_file(issue, f, dry_run=False)
+    assert result["fields"] == {} and result["error"] is None
+    assert os.stat(f.path).st_mtime_ns == mtime and f.tagged_at == first
+
+
+def test_unusual_zip_errors_become_archive_errors(tmp_path, monkeypatch):
+    p = make_cbz(tmp_path / "a.cbz", comicinfo=EXISTING)
+    import zlib
+
+    def boom(*a, **k):
+        raise zlib.error("invalid stored block lengths")
+
+    monkeypatch.setattr(zipfile.ZipFile, "read", boom)
+    with pytest.raises(cbz.ArchiveError):
+        cbz.read_metadata(p)
+    with pytest.raises(cbz.ArchiveError):
+        cbz.write_metadata(p, {"ComicInfo.xml": b"<ComicInfo/>"})
+
+
+def test_unmatch_clears_metron_derived_values(app):
+    from fumora.importer import unmatch_series
+
+    with app.state.session_factory() as db:
+        s = Series(name="S", match_status="matched", metron_id=5, confirmed_by="auto", locked_fields=[])
+        i = Issue(series=s, number="1", metron_id=9, rating="Mature", isbn="X", gcd_id=7,
+                  upc="U", locked_fields=["isbn"])  # fmt: skip
+        i.files = [File(path="/x.cbz")]
+        db.add_all([s, i])
+        db.flush()
+        unmatch_series(db, s, "no")
+        assert (i.rating, i.gcd_id, i.upc) == (None, None, None)
+        assert i.isbn == "X"  # locked by the user
+
+
+def test_metroninfo_root_attributes_are_not_a_change(app, tmp_path):
+    db, issue, f = _series_with_file(app, tmp_path)
+    tag_file(issue, f, dry_run=False)
+    with zipfile.ZipFile(f.path) as zf:
+        mi = zf.read("MetronInfo.xml")
+    decorated = mi.replace(
+        b"<MetronInfo>", b'<MetronInfo xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
+    )
+    assert decorated != mi
+    cbz.write_metadata(f.path, {"MetronInfo.xml": decorated})
+    assert tag_file(issue, f, dry_run=True)["fields"] == {}

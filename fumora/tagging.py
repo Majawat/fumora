@@ -1,5 +1,6 @@
 """Tagging: turn Fumora's data into ComicInfo.xml + MetronInfo.xml in each file."""
 
+import xml.etree.ElementTree as ET
 from datetime import UTC, date, datetime
 
 from sqlalchemy.orm import Session
@@ -57,18 +58,19 @@ def issue_meta(issue: Issue) -> IssueMeta:
         imprint_metron_id=series.imprint.metron_id if series.imprint else None,
         genres=list(series.genres or []),
         number=issue.number,
-        title=(d.get("title") or None) or issue.title,
+        title=issue.title if "title" in (issue.locked_fields or []) else (d.get("title") or issue.title),
         stories=[s for s in d.get("name") or [] if s],
         collection_title=d.get("title") or None,
         alt_number=d.get("alt_number") or issue.alt_number or None,
         summary=d.get("desc") or None,
         cover_date=issue.cover_date or _date(d.get("cover_date")),
         store_date=issue.store_date or _date(d.get("store_date")),
-        page_count=d.get("page") or issue.page_count or None,
+        # ensure_detail copies these from Metron unless the user locked them.
+        page_count=issue.page_count or None,
         price=d.get("price"),
         price_currency=d.get("price_currency"),
-        isbn=d.get("isbn") or issue.isbn or None,
-        upc=d.get("upc") or issue.upc or None,
+        isbn=issue.isbn or None,
+        upc=issue.upc or None,
         credits=[
             (c["creator"], c.get("id"), [(r["name"], r.get("id")) for r in c.get("role") or []])
             for c in d.get("credits") or []
@@ -104,16 +106,34 @@ async def ensure_detail(db: Session, client: MetronClient, issue: Issue) -> None
     for field, value in (("isbn", d.get("isbn")), ("upc", d.get("upc")), ("page_count", d.get("page"))):
         if value and field not in (issue.locked_fields or []):
             setattr(issue, field, value)
-    if d.get("gcd_id") and issue.gcd_id is None:
+    if d.get("gcd_id") and "gcd_id" not in (issue.locked_fields or []):
         issue.gcd_id = d["gcd_id"]
     db.flush()
 
 
 def check_writable(series: Series, file: File) -> None:
-    if series.match_status == "matched" and series.confirmed_by is None:
+    if not series.writable:
         raise NotWritable("Metron match not confirmed")
     if not cbz.is_cbz(file.path):
         raise NotWritable(f"{file.path.rsplit('.', 1)[-1].upper()} files can't be tagged (CBZ only)")
+
+
+def _without_notes(xml: bytes) -> bytes:
+    """MetronInfo's content for comparison: no <Notes> (it carries the tagging
+    date), no root attributes or namespace declarations, no whitespace."""
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError:
+        return xml
+    parts = []
+    for child in root:
+        if child.tag == "Notes":
+            continue
+        for el in child.iter():
+            el.tail = (el.tail or "").strip() or None
+            el.text = (el.text or "").strip() or None
+        parts.append(ET.tostring(child))
+    return b"".join(parts)
 
 
 def plan_file(issue: Issue, file: File) -> tuple[dict[str, bytes], dict[str, tuple]]:
@@ -124,9 +144,12 @@ def plan_file(issue: Issue, file: File) -> tuple[dict[str, bytes], dict[str, tup
     new_ci, changes = merge_comicinfo(comicinfo, meta)
     files = {cbz.COMICINFO: new_ci}
     if issue.metron_id:
-        files[cbz.METRONINFO] = build_metroninfo(meta, metroninfo)
+        new_mi = build_metroninfo(meta, metroninfo)
+        files[cbz.METRONINFO] = new_mi
         if metroninfo is None:
             changes["MetronInfo.xml"] = (None, "added")
+        elif _without_notes(metroninfo) != _without_notes(new_mi):
+            changes["MetronInfo.xml"] = ("", "updated")
     # "Notes" always changes (it carries the tagging date); not worth showing alone.
     meaningful = {k: v for k, v in changes.items() if k != "Notes"}
     return files, meaningful
@@ -136,7 +159,9 @@ def tag_file(issue: Issue, file: File, dry_run: bool) -> dict:
     """Preview (dry run) or write one file. Returns what is stored in file.tag_preview."""
     try:
         files, changes = plan_file(issue, file)
-        if not dry_run:
+        # Only rewrite when something real changes: a rewrite copies the whole
+        # archive, makes readers rescan it and breaks torrent hardlinks.
+        if not dry_run and changes:
             cbz.write_metadata(file.path, files)
             file.tagged_at = datetime.now(UTC)
         result = {"fields": {k: list(v) for k, v in changes.items()}, "error": None}

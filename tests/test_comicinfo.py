@@ -36,7 +36,18 @@ def meta_from_fixture(app, metron_id: int, **series_kw):
             locked_fields=[],
             **series_kw,
         )
-        i = Issue(series=s, number=d["number"], metron_id=d["id"], metron_detail=d, locked_fields=[])
+        # As ensure_detail would after fetching Metron's record.
+        i = Issue(
+            series=s,
+            number=d["number"],
+            metron_id=d["id"],
+            metron_detail=d,
+            isbn=d["isbn"] or None,
+            upc=d["upc"] or None,
+            page_count=d["page"] or None,
+            rating=d["rating"]["name"],
+            locked_fields=[],
+        )
         db.add_all([pub, s, i])
         db.flush()
         return issue_meta(i)
@@ -131,3 +142,39 @@ def test_number_formatting_is_not_a_change(app):
     padded = first.replace(b"<Month>9</Month>", b"<Month>09</Month>")
     assert b"<Month>09</Month>" in padded
     assert "Month" not in merge_comicinfo(padded, meta)[1]
+
+
+def test_xsi_attributes_in_existing_file_stay_well_formed(app):
+    meta = meta_from_fixture(app, 186450)
+    existing = EXISTING.replace("<Number>1</Number>", '<Number>1</Number><Count xsi:nil="true"/>')
+    xml, _ = merge_comicinfo(existing.encode(), meta)
+    root = ET.fromstring(xml)  # duplicate xmlns:xsi would fail here
+    assert root.find("Count").get("{http://www.w3.org/2001/XMLSchema-instance}nil") == "true"
+    assert xml.count(b"xmlns:xsi") == 1
+
+
+def test_metroninfo_keeps_elements_fumora_does_not_produce(app):
+    meta = meta_from_fixture(app, 186450)
+    old = (
+        b"<MetronInfo><Series><Name>Old</Name></Series><MangaVolume>3</MangaVolume>"
+        b"<Locations><Location>Gotham</Location></Locations><Tags><Tag>Old</Tag></Tags></MetronInfo>"
+    )
+    xml = build_metroninfo(meta, old)
+    root = ET.fromstring(xml)
+    assert root.findtext("Series/Name") == "Private Dance"
+    assert root.findtext("MangaVolume") == "3"
+    assert root.findtext("Locations/Location") == "Gotham"
+    tags = [c.tag for c in root]
+    assert tags.index("MangaVolume") < tags.index("Number") < tags.index("Locations")
+    validate(xml, "MetronInfo-v1.1.xsd")
+
+
+def test_locked_isbn_is_not_replaced_by_metron(app):
+    d = metron_issue(156154)
+    with app.state.session_factory() as db:
+        s = Series(name="T", locked_fields=[])
+        i = Issue(series=s, number="1", metron_id=d["id"], metron_detail=d, isbn="1234567890",
+                  locked_fields=["isbn"])  # fmt: skip
+        db.add_all([s, i])
+        db.flush()
+        assert issue_meta(i).isbn == "1234567890"

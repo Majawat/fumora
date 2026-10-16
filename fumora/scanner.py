@@ -70,7 +70,10 @@ def scan_folders(db: Session, series_ids: list[int] | None = None) -> ScanResult
     by_folder: dict[str, list[Series]] = defaultdict(list)
     for s in db.scalars(q):
         by_folder[s.path].append(s)
-    known = set(db.scalars(select(File.path)))
+    # Files already linked to an issue are done; unlinked ones are tried again,
+    # since an issue may have been added (e.g. by a Metron sync) since.
+    known = set(db.scalars(select(File.path).where(File.issue_id.is_not(None))))
+    unlinked_rows = {f.path: f for f in db.scalars(select(File).where(File.issue_id.is_(None)))}
 
     for folder, group in by_folder.items():
         if not os.path.isdir(folder):
@@ -107,13 +110,17 @@ def scan_folders(db: Session, series_ids: list[int] | None = None) -> ScanResult
             if number is not None:
                 want = normalize_number(number)
                 issue = next((i for i in series.issues if normalize_number(i.number) == want), None)
+            row = unlinked_rows.pop(path, None)
             if issue is not None and not issue.files:
-                issue.files.append(File(path=path, size=os.path.getsize(path)))
+                if row is None:
+                    row = File(path=path, size=os.path.getsize(path))
+                issue.files.append(row)
                 if issue.status != "Downloaded":
                     issue.status = "Downloaded"
                 result.linked += 1
             else:
-                db.add(File(issue_id=None, path=path, size=os.path.getsize(path)))
+                if row is None:
+                    db.add(File(issue_id=None, path=path, size=os.path.getsize(path)))
                 (result.duplicates if issue is not None else result.unlinked).append(path)
             known.add(path)
             db.flush()

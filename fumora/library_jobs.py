@@ -56,7 +56,8 @@ def make_retag_handler(make_client: Callable[[str, str], MetronClient]):
         if not user or not password:
             raise RuntimeError("Metron username and password are not set")
         done = params.get("done_issue_ids") or []
-        todo = [i for i in issue_ids if i not in set(done)]
+        done_set = set(done)
+        todo = [i for i in issue_ids if i not in done_set]
         ctx.update(phase="preview" if dry_run else "write", progress=len(done), total=len(issue_ids))
         counts = {"changed": 0, "unchanged": 0, "errors": 0}
         async with make_client(user, password) as client:
@@ -144,17 +145,16 @@ def make_organize_handler():
             series_list = db.scalars(select(Series).where(Series.id.in_(ids))).all()
             ctx.update(phase="rename", progress=0, total=len(series_list))
             for n, series in enumerate(series_list, 1):
-                if series.match_status == "matched" and series.confirmed_by is None:
+                if not series.writable:
                     problems.append(f"{series.name}: match not confirmed")
                     continue
                 plan = naming.plan_series(series, shared_folder=series.path in shared, **opts)
-                try:
-                    problems += await asyncio.to_thread(naming.apply_plan, db, series, plan)
-                    renamed += len(plan.files) + (1 if plan.folder else 0)
-                    db.commit()
-                except (naming.OrganizeError, OSError) as exc:
-                    db.rollback()
-                    problems.append(f"{series.name}: {exc}")
+                # apply_plan updates the database after each successful rename and
+                # reports the rest, so the database always matches the disk.
+                done_count, skipped = await asyncio.to_thread(naming.apply_plan, db, series, plan)
+                renamed += done_count
+                problems += [f"{series.name}: {p}" for p in skipped]
+                db.commit()
                 ctx.update(progress=n)
             summary = f"Renamed {renamed} files/folders" + (f"; {len(problems)} skipped" if problems else "")
             log(db, summary + (": " + "; ".join(problems[:5]) if problems else ""), kind="organize")

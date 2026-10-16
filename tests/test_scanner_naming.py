@@ -104,7 +104,7 @@ def test_plan_and_apply_rename(app, tmp_path):
             "Umbrella Academy Dallas 001 (2008).cbz",
             "Umbrella Academy Dallas 002 (2008).cbz",
         ]
-        assert naming.apply_plan(db, s, plan) == []
+        assert naming.apply_plan(db, s, plan) == (3, [])
         new = tmp_path / "Umbrella Academy Dallas (2008)" / "Umbrella Academy Dallas 001 (2008).cbz"
         assert new.read_bytes() == b"one" and os.stat(new).st_ino == inode  # same file, just renamed
         assert s.path == str(tmp_path / "Umbrella Academy Dallas (2008)")
@@ -117,3 +117,47 @@ def test_shared_folder_is_not_renamed(app, tmp_path):
         s = _series(db, tmp_path / "Shared")
         plan = naming.plan_series(s, shared_folder=True)
         assert plan.folder is None and plan.skipped
+
+
+def test_failed_rename_keeps_database_in_step(app, tmp_path, monkeypatch):
+    folder = tmp_path / "old"
+    folder.mkdir()
+    (folder / "a.cbz").write_bytes(b"a")
+    (folder / "b.cbz").write_bytes(b"b")
+    (folder / "stray.cbz").write_bytes(b"s")
+    with app.state.session_factory() as db:
+        s = _series(db, folder)
+        for n, name in (("1", "a"), ("2", "b")):
+            i = Issue(series=s, number=n, cover_date=date(2008, 10, 1), locked_fields=[])
+            i.files = [File(path=str(folder / f"{name}.cbz"))]
+            db.add(i)
+        stray = File(issue_id=None, path=str(folder / "stray.cbz"))
+        db.add(stray)
+        db.flush()
+        real_rename = os.rename
+
+        def flaky(src, dst):
+            if str(src).endswith("b.cbz"):
+                raise PermissionError("in use")
+            return real_rename(src, dst)
+
+        monkeypatch.setattr("fumora.naming.os.rename", flaky)
+        done, problems = naming.apply_plan(db, s, naming.plan_series(s))
+        assert done == 2 and any("in use" in p for p in problems)  # folder + file a
+        for f in [*(f for i in s.issues for f in i.files), stray]:
+            assert os.path.exists(f.path), f.path  # every row points at a real file
+
+
+def test_unlinked_file_is_linked_by_a_later_scan(app, tmp_path):
+    folder = tmp_path / "S"
+    folder.mkdir()
+    (folder / "S 012 (2024).cbz").write_bytes(b"x")
+    with app.state.session_factory() as db:
+        s = Series(name="S", path=str(folder), locked_fields=[])
+        db.add(s)
+        db.flush()
+        assert scan_folders(db).unlinked
+        db.add(Issue(series=s, number="12", locked_fields=[]))  # e.g. added by a Metron sync
+        db.flush()
+        assert scan_folders(db).linked == 1
+        assert len(db.scalars(__import__("sqlalchemy").select(File)).all()) == 1

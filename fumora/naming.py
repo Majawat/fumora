@@ -157,30 +157,47 @@ class OrganizeError(Exception):
     pass
 
 
-def apply_plan(db, series: Series, plan: OrganizePlan) -> list[str]:
-    """Carry out a plan. Renames on the same filesystem keep each file's inode and
-    content, so readers can recognise the moved file. Returns problems skipped."""
+def apply_plan(db, series: Series, plan: OrganizePlan) -> tuple[int, list[str]]:
+    """Carry out a plan; returns (renames done, problems skipped).
+
+    Each rename updates the database right after it succeeds, and a failed one
+    is reported and skipped, so the database always matches the disk. Renames on
+    the same filesystem keep each file's inode and content.
+    """
+    from sqlalchemy import select
+
+    from .models import File
+
     problems = list(plan.skipped)
-    files_by_id = {f.id: f for i in series.issues for f in i.files}
+    done = 0
     if plan.folder:
         if os.path.exists(plan.folder.new):
-            raise OrganizeError(f"Folder already exists: {plan.folder.new}")
-        os.rename(plan.folder.old, plan.folder.new)
+            return 0, problems + [f"Folder already exists: {os.path.basename(plan.folder.new)}"]
+        try:
+            os.rename(plan.folder.old, plan.folder.new)
+        except OSError as exc:
+            return 0, problems + [f"Folder not renamed: {exc}"]
+        done += 1
         old_prefix = plan.folder.old.rstrip("/") + "/"
-        for f in files_by_id.values():
-            if f.path.startswith(old_prefix):
-                f.path = plan.folder.new + "/" + f.path[len(old_prefix) :]
+        # Every File row in the folder, including ones not linked to an issue.
+        for f in db.scalars(select(File).where(File.path.startswith(old_prefix))):
+            f.path = plan.folder.new + "/" + f.path[len(old_prefix) :]
         series.path = plan.folder.new
         db.flush()
+    files_by_id = {f.id: f for i in series.issues for f in i.files}
     for r in plan.files:
         f = files_by_id.get(r.file_id)
         if f is None:
             continue
-        current = f.path
         if os.path.exists(r.new):
             problems.append(f"Not renamed, target exists: {os.path.basename(r.new)}")
             continue
-        os.rename(current, r.new)
+        try:
+            os.rename(f.path, r.new)
+        except OSError as exc:
+            problems.append(f"Not renamed: {os.path.basename(f.path)}: {exc}")
+            continue
         f.path = r.new
+        done += 1
         db.flush()
-    return problems
+    return done, problems

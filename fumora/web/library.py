@@ -10,7 +10,14 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import naming, settings_store
 from ..import_job import KIND as MYLAR_IMPORT
-from ..importer import apply_metron_series, import_report, log, sync_series_issues, unmatch_series
+from ..importer import (
+    apply_metron_series,
+    clear_metron_values,
+    import_report,
+    log,
+    sync_series_issues,
+    unmatch_series,
+)
 from ..library_jobs import ORGANIZE, RETAG, SCAN, naming_settings, shared_folders
 from ..metron import MetronError
 from ..models import File, Issue, Series, Tag
@@ -81,7 +88,7 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
             "effective_rating": series_rating(series),
             "tag_names": ", ".join(sorted(t.name for t in series.tags)),
             "plan": plan,
-            "writable": series.match_status != "matched" or series.confirmed_by is not None,
+            "writable": series.writable,
         }
 
     @app.get("/series/{series_id}", response_class=HTMLResponse)
@@ -160,15 +167,14 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
     @app.post("/series/{series_id}/retag")
     async def series_retag(series_id: int, write: bool = Form(False), db: Session = Depends(get_db)):
         series = _get_series(db, series_id)
-        if write and series.match_status == "matched" and series.confirmed_by is None:
+        if write and not series.writable:
             raise HTTPException(400, "Confirm the Metron match before writing tags.")
         _start(RETAG, {"series_ids": [series_id], "dry_run": not write})
         return RedirectResponse(f"/series/{series_id}", status_code=303)
 
     @app.post("/series/{series_id}/organize")
     async def series_organize(series_id: int, db: Session = Depends(get_db)):
-        series = _get_series(db, series_id)
-        if series.match_status == "matched" and series.confirmed_by is None:
+        if not _get_series(db, series_id).writable:
             raise HTTPException(400, "Confirm the Metron match before renaming.")
         _start(ORGANIZE, {"series_ids": [series_id]})
         return RedirectResponse(f"/series/{series_id}", status_code=303)
@@ -222,9 +228,7 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
                             series.issues.remove(issue)
                             db.delete(issue)
                         else:
-                            issue.metron_id = None
-                            issue.match_status = None
-                            issue.metron_detail = None
+                            clear_metron_values(issue)
                     db.flush()
                     await sync_series_issues(db, client, series)
                     series.issues_synced = datetime.now(UTC)
