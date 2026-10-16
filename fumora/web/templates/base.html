@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Fumora{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/htmx.min.js" defer></script>
+</head>
+<body>
+  {% block nav %}
+  <header class="topbar">
+    <a class="brand" href="/">Fumora</a>
+    <nav>
+      <a href="/">Dashboard</a>
+      <a href="/settings">Settings</a>
+    </nav>
+    <form method="post" action="/logout"><button class="link">Log out</button></form>
+  </header>
+  {% endblock %}
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer>Fumora {{ version }}</footer>
+</body>
+</html>

@@ -1,0 +1,28 @@
+# CLAUDE.md
+
+Fumora: Metron-first comic manager (Mylar3 replacement). Python 3.12+,
+FastAPI, SQLAlchemy 2 + Alembic on SQLite, Jinja2 + htmx (vendored in
+`fumora/web/static`). One container, port 8792.
+
+Design truth: the Claude Doc linked in `docs/DESIGN.md`. Read it first.
+
+## Commands
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
+.venv/bin/pytest                                   # offline; no network calls
+FUMORA_CONFIG_DIR=./data/config .venv/bin/uvicorn fumora.asgi:app --reload --port 8792
+.venv/bin/alembic revision --autogenerate -m "..."  # after editing models.py
+docker compose up --build
+```
+
+## Rules
+
+- Own integer ids everywhere; metron_id / cv_id / gcd_id are optional cross-reference columns.
+- Field names follow Metron's API. A TPB is its own series (Metron series_type), linked via `reprint`.
+- All Metron calls go through the single `app.state.metron_limiter` (burst 20, 5,000/day).
+- Secrets live in the `setting` table and are never rendered back to the browser or logged.
+- Never delete library files; never chown anything outside `/config`.
+- Tests stay offline (respx mocks). `tests/test_migrations.py` fails if models and migrations drift.
+- Files get ComicInfo.xml 2.1 + MetronInfo.xml 1.1, merged — never drop fields we don't own (e.g. `<Tags>`).
+- No integration with Komga or BookOrbit; they folder-watch.

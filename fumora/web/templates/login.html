@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Log in · Fumora{% endblock %}
+{% block nav %}{% endblock %}
+{% block content %}
+<form class="card narrow" method="post" action="/login">
+  <h1>Fumora</h1>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <label>Username <input name="username" required autocomplete="username"></label>
+  <label>Password <input name="password" type="password" required autocomplete="current-password"></label>
+  <button>Log in</button>
+</form>
+{% endblock %}

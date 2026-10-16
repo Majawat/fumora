@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Dashboard</h1>
+{% if not metron_ready %}
+<p class="notice">Add your Metron login on the <a href="/settings">Settings</a> page to get started.</p>
+{% endif %}
+<section class="stats">
+  <div class="stat"><span>{{ stats.series }}</span>Series</div>
+  <div class="stat"><span>{{ stats.monitored }}</span>Monitored</div>
+  <div class="stat"><span>{{ stats.issues }}</span>Issues</div>
+  <div class="stat"><span>{{ stats.wanted }}</span>Wanted</div>
+</section>
+<h2>Activity</h2>
+{% if events %}
+<table class="log">
+  <thead><tr><th>Time (UTC)</th><th>Event</th></tr></thead>
+  <tbody>
+  {% for e in events %}
+    <tr class="{{ e.level }}"><td>{{ e.ts.strftime('%Y-%m-%d %H:%M') }}</td><td>{{ e.message }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">Nothing yet.</p>
+{% endif %}
+{% endblock %}

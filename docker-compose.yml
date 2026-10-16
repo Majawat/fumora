@@ -1,0 +1,16 @@
+services:
+  fumora:
+    build: .
+    image: fumora:dev
+    container_name: fumora
+    ports:
+      - "8792:8792"
+    environment:
+      - PUID=99
+      - PGID=100
+      - UMASK=0002
+    volumes:
+      - ./data/config:/config
+      # - /mnt/user/data/media/Comics:/comics
+      # - /mnt/user/data/downloads:/downloads
+    restart: unless-stopped

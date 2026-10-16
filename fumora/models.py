@@ -1,0 +1,221 @@
+"""Database models.
+
+Every row has its own integer id. Metron, ComicVine and GCD ids are optional
+cross-reference columns, so a series that exists only on ComicVine still fits
+and a Metron re-id is a one-column update. Field names follow Metron's API.
+"""
+
+from datetime import date, datetime, timezone
+
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Publisher(Base):
+    __tablename__ = "publisher"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    metron_id: Mapped[int | None] = mapped_column(unique=True)
+    cv_id: Mapped[int | None] = mapped_column(index=True)
+    gcd_id: Mapped[int | None] = mapped_column(index=True)
+    name: Mapped[str] = mapped_column(String(255))
+
+
+class Imprint(Base):
+    __tablename__ = "imprint"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    metron_id: Mapped[int | None] = mapped_column(unique=True)
+    name: Mapped[str] = mapped_column(String(255))
+    publisher_id: Mapped[int | None] = mapped_column(ForeignKey("publisher.id"))
+
+
+series_tag = Table(
+    "series_tag",
+    Base.metadata,
+    Column("series_id", ForeignKey("series.id", ondelete="CASCADE"), primary_key=True),
+    Column("tag_id", ForeignKey("tag.id", ondelete="CASCADE"), primary_key=True),
+)
+
+issue_tag = Table(
+    "issue_tag",
+    Base.metadata,
+    Column("issue_id", ForeignKey("issue.id", ondelete="CASCADE"), primary_key=True),
+    Column("tag_id", ForeignKey("tag.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
+class Tag(Base):
+    """Free-form user tag (e.g. "Explicit"); written to ComicInfo <Tags>."""
+
+    __tablename__ = "tag"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+
+
+class Series(Base):
+    __tablename__ = "series"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    metron_id: Mapped[int | None] = mapped_column(unique=True)
+    cv_id: Mapped[int | None] = mapped_column(index=True)
+    gcd_id: Mapped[int | None] = mapped_column(index=True)
+    # 'metron' or 'cv': which service this row is refreshed from.
+    source: Mapped[str] = mapped_column(String(10), default="metron")
+
+    name: Mapped[str] = mapped_column(String(255))
+    sort_name: Mapped[str | None] = mapped_column(String(255))
+    volume: Mapped[int | None]
+    year_began: Mapped[int | None]
+    year_end: Mapped[int | None]
+    # Metron series_type name: Single Issue, Trade Paperback, Annual, ...
+    series_type: Mapped[str | None] = mapped_column(String(50))
+    status: Mapped[str | None] = mapped_column(String(50))
+    desc: Mapped[str | None] = mapped_column(Text)
+    genres: Mapped[list | None] = mapped_column(JSON)
+    publisher_id: Mapped[int | None] = mapped_column(ForeignKey("publisher.id"))
+    imprint_id: Mapped[int | None] = mapped_column(ForeignKey("imprint.id"))
+    modified: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Ours
+    monitored: Mapped[bool] = mapped_column(Boolean, default=False)
+    path: Mapped[str | None] = mapped_column(String(1024))
+    # Metron age-rating vocabulary; overrides the rating calculated from issues.
+    age_rating_override: Mapped[str | None] = mapped_column(String(30))
+    # Field names a user edited; a refresh never overwrites these.
+    locked_fields: Mapped[list] = mapped_column(JSON, default=list)
+    last_synced: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    added: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    publisher: Mapped[Publisher | None] = relationship()
+    imprint: Mapped[Imprint | None] = relationship()
+    issues: Mapped[list["Issue"]] = relationship(back_populates="series", cascade="all, delete-orphan")
+    tags: Mapped[list[Tag]] = relationship(secondary=series_tag)
+
+
+class Issue(Base):
+    __tablename__ = "issue"
+    __table_args__ = (UniqueConstraint("series_id", "number", name="uq_issue_series_number"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    series_id: Mapped[int] = mapped_column(ForeignKey("series.id", ondelete="CASCADE"), index=True)
+    metron_id: Mapped[int | None] = mapped_column(unique=True)
+    cv_id: Mapped[int | None] = mapped_column(index=True)
+    gcd_id: Mapped[int | None] = mapped_column(index=True)
+
+    number: Mapped[str] = mapped_column(String(20))
+    alt_number: Mapped[str | None] = mapped_column(String(20))
+    # Numeric sort key derived from `number` ("1.MU" -> 1.0, "½" -> 0.5).
+    sort_number: Mapped[float | None]
+    title: Mapped[str | None] = mapped_column(String(500))
+    cover_date: Mapped[date | None] = mapped_column(Date)
+    store_date: Mapped[date | None] = mapped_column(Date)
+    foc_date: Mapped[date | None] = mapped_column(Date)
+    # Metron age-rating vocabulary (Unknown, Everyone, Teen, Teen Plus, Mature, Explicit, Adult).
+    rating: Mapped[str | None] = mapped_column(String(30))
+    isbn: Mapped[str | None] = mapped_column(String(20))
+    upc: Mapped[str | None] = mapped_column(String(30))
+    page_count: Mapped[int | None]
+    price: Mapped[float | None]
+    modified: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Ours. status: Wanted, Downloaded, Skipped, Ignored
+    status: Mapped[str] = mapped_column(String(20), default="Skipped")
+    monitored: Mapped[bool] = mapped_column(Boolean, default=False)
+    rating_override: Mapped[str | None] = mapped_column(String(30))
+    locked_fields: Mapped[list] = mapped_column(JSON, default=list)
+    last_synced: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    series: Mapped[Series] = relationship(back_populates="issues")
+    files: Mapped[list["File"]] = relationship(back_populates="issue")
+    tags: Mapped[list[Tag]] = relationship(secondary=issue_tag)
+
+
+class Reprint(Base):
+    """A collected edition (TPB issue) and one issue it reprints."""
+
+    __tablename__ = "reprint"
+
+    collection_issue_id: Mapped[int] = mapped_column(
+        ForeignKey("issue.id", ondelete="CASCADE"), primary_key=True
+    )
+    reprinted_issue_id: Mapped[int] = mapped_column(
+        ForeignKey("issue.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class File(Base):
+    __tablename__ = "file"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    issue_id: Mapped[int | None] = mapped_column(ForeignKey("issue.id", ondelete="SET NULL"), index=True)
+    path: Mapped[str] = mapped_column(String(1024), unique=True)
+    size: Mapped[int | None]
+    crc: Mapped[str | None] = mapped_column(String(16))
+    tagged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    added: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    issue: Mapped[Issue | None] = relationship(back_populates="files")
+
+
+class Grab(Base):
+    __tablename__ = "grab"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    issue_id: Mapped[int | None] = mapped_column(ForeignKey("issue.id", ondelete="SET NULL"), index=True)
+    indexer: Mapped[str] = mapped_column(String(100))
+    release_title: Mapped[str] = mapped_column(String(500))
+    client: Mapped[str] = mapped_column(String(50))
+    client_job_id: Mapped[str | None] = mapped_column(String(100))
+    state: Mapped[str] = mapped_column(String(20), default="queued")
+    created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Event(Base):
+    """Activity log shown in the UI."""
+
+    __tablename__ = "event"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    level: Mapped[str] = mapped_column(String(10), default="info")
+    kind: Mapped[str] = mapped_column(String(50))
+    message: Mapped[str] = mapped_column(Text)
+    series_id: Mapped[int | None] = mapped_column(ForeignKey("series.id", ondelete="SET NULL"))
+    issue_id: Mapped[int | None] = mapped_column(ForeignKey("issue.id", ondelete="SET NULL"))
+
+
+class Setting(Base):
+    __tablename__ = "setting"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str | None] = mapped_column(Text)
+
+
+class User(Base):
+    __tablename__ = "user"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(100), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255))

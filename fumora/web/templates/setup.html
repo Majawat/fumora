@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Set up Fumora{% endblock %}
+{% block nav %}{% endblock %}
+{% block content %}
+<form class="card narrow" method="post" action="/setup">
+  <h1>Welcome to Fumora</h1>
+  <p>Create the admin account.</p>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <label>Username <input name="username" required autocomplete="username"></label>
+  <label>Password <input name="password" type="password" required minlength="8" autocomplete="new-password"></label>
+  <label>Repeat password <input name="password2" type="password" required minlength="8" autocomplete="new-password"></label>
+  <button>Create account</button>
+</form>
+{% endblock %}

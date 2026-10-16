@@ -1,0 +1,77 @@
+"""User-editable settings stored in the `setting` table.
+
+Secret values (passwords, API keys) are write-only from the UI's point of
+view: the page shows whether one is set, never the value.
+"""
+
+from dataclasses import dataclass
+
+from sqlalchemy.orm import Session
+
+from .models import Setting
+
+
+@dataclass(frozen=True)
+class SettingDef:
+    key: str
+    label: str
+    group: str
+    secret: bool = False
+    default: str | None = None
+    help: str = ""
+
+
+SETTINGS: list[SettingDef] = [
+    SettingDef("metron.username", "Username", "Metron"),
+    SettingDef("metron.password", "Password", "Metron", secret=True),
+    SettingDef("comicvine.api_key", "API key", "ComicVine", secret=True,
+               help="Fallback only, for series Metron does not have."),
+    SettingDef("library.path", "Library folder", "Library", default="/comics",
+               help="Path inside the container where comic series folders live."),
+]
+
+SETTINGS_BY_KEY = {s.key: s for s in SETTINGS}
+
+
+def get(db: Session, key: str) -> str | None:
+    row = db.get(Setting, key)
+    if row is not None and row.value not in (None, ""):
+        return row.value
+    return SETTINGS_BY_KEY[key].default if key in SETTINGS_BY_KEY else None
+
+
+def put(db: Session, key: str, value: str | None) -> None:
+    if key not in SETTINGS_BY_KEY:
+        raise KeyError(key)
+    row = db.get(Setting, key)
+    if row is None:
+        db.add(Setting(key=key, value=value))
+    else:
+        row.value = value
+
+
+def is_set(db: Session, key: str) -> bool:
+    row = db.get(Setting, key)
+    return row is not None and row.value not in (None, "")
+
+
+def apply_form(db: Session, form: dict[str, str]) -> list[str]:
+    """Save submitted settings; returns the keys that changed.
+
+    A blank secret field means "keep the saved value", so the page never has
+    to send a secret back to the browser.
+    """
+    changed = []
+    for sdef in SETTINGS:
+        if sdef.key not in form:
+            continue
+        value = form[sdef.key].strip()
+        if sdef.secret and value == "":
+            if form.get(f"{sdef.key}.clear") and is_set(db, sdef.key):
+                put(db, sdef.key, None)
+                changed.append(sdef.key)
+            continue
+        if value != (get(db, sdef.key) or ""):
+            put(db, sdef.key, value or None)
+            changed.append(sdef.key)
+    return changed
