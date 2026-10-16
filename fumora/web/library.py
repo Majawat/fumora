@@ -23,7 +23,7 @@ MATCH_LABELS = {
 }
 
 
-def _series_rows(db: Session, where=None):
+def _series_rows(db: Session, where=None, name_like: str | None = None, having_unmatched: bool = False):
     have = func.sum(case((Issue.status == "Downloaded", 1), else_=0))
     unmatched = func.sum(case((Issue.match_status == "unmatched", 1), else_=0))
     q = (
@@ -34,6 +34,10 @@ def _series_rows(db: Session, where=None):
     )
     if where is not None:
         q = q.where(where)
+    if name_like:
+        q = q.where(Series.name.ilike(f"%{name_like}%"))
+    if having_unmatched:
+        q = q.having(unmatched > 0)
     return [
         {"series": s, "total": total, "have": have or 0, "unmatched": unmatched or 0}
         for s, total, have, unmatched in db.execute(q).all()
@@ -50,10 +54,7 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
         where = None
         if match in MATCH_LABELS:
             where = Series.match_status == match
-        rows = _series_rows(db, where)
-        if q:
-            needle = q.lower()
-            rows = [r for r in rows if needle in r["series"].name.lower()]
+        rows = _series_rows(db, where, name_like=q)
         return templates.TemplateResponse(
             request, "series_list.html", {"rows": rows, "match": match, "q": q or ""}
         )
@@ -128,10 +129,8 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
             )
         return RedirectResponse(f"/series/{series_id}", status_code=303)
 
-    def import_context(db: Session) -> dict:
-        job = app.state.jobs.latest(MYLAR_IMPORT)
-        review = _series_rows(db, Series.match_status.in_(("review", "not_found", "accepted")))
-        with_unmatched = [r for r in _series_rows(db, Series.match_status == "matched") if r["unmatched"]]
+    def status_context(db: Session) -> dict:
+        """What the polled status box needs: the job and the report counts."""
         missing_files = db.scalar(
             select(func.count())
             .select_from(Issue)
@@ -139,32 +138,38 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
             .where(Issue.status == "Downloaded", File.id.is_(None))
         )
         return {
-            "job": job,
+            "job": app.state.jobs.latest(MYLAR_IMPORT),
             "report": import_report(db),
-            "review": review,
-            "with_unmatched": with_unmatched,
             "missing_files": missing_files,
+        }
+
+    def import_context(db: Session) -> dict:
+        return {
+            **status_context(db),
+            "review": _series_rows(db, Series.match_status.in_(("review", "not_found", "accepted"))),
+            "with_unmatched": _series_rows(db, Series.match_status == "matched", having_unmatched=True),
             "mylar_path": settings_store.get(db, "mylar.db_path"),
         }
 
+    # Endpoints that start jobs are async: the job runner needs the event loop.
     @app.post("/series/{series_id}/accept-suggestion")
-    def series_accept_suggestion(series_id: int, db: Session = Depends(get_db)):
+    async def series_accept_suggestion(series_id: int, db: Session = Depends(get_db)):
         series = db.get(Series, series_id)
         if series is None or not series.suggested_metron_id:
             raise HTTPException(404)
         series.match_status = "accepted"
         db.commit()
-        app.state.jobs.start(MYLAR_IMPORT)
+        app.state.jobs.start(MYLAR_IMPORT, {"skip_read": True})
         return RedirectResponse(f"/series/{series_id}", status_code=303)
 
     @app.post("/import/accept-suggestions")
-    def import_accept_suggestions(db: Session = Depends(get_db)):
+    async def import_accept_suggestions(db: Session = Depends(get_db)):
         for series in db.scalars(
             select(Series).where(Series.match_status == "review", Series.suggested_metron_id.is_not(None))
         ):
             series.match_status = "accepted"
         db.commit()
-        app.state.jobs.start(MYLAR_IMPORT)
+        app.state.jobs.start(MYLAR_IMPORT, {"skip_read": True})
         return RedirectResponse("/import", status_code=303)
 
     @app.get("/import", response_class=HTMLResponse)
@@ -172,10 +177,10 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
         return templates.TemplateResponse(request, "import.html", import_context(db))
 
     @app.post("/import/start", response_class=HTMLResponse)
-    def import_start(request: Request, db: Session = Depends(get_db)):
+    async def import_start(request: Request, db: Session = Depends(get_db)):
         app.state.jobs.start(MYLAR_IMPORT)
-        return templates.TemplateResponse(request, "_import_status.html", import_context(db))
+        return templates.TemplateResponse(request, "_import_status.html", status_context(db))
 
     @app.get("/import/status", response_class=HTMLResponse)
     def import_status(request: Request, db: Session = Depends(get_db)):
-        return templates.TemplateResponse(request, "_import_status.html", import_context(db))
+        return templates.TemplateResponse(request, "_import_status.html", status_context(db))

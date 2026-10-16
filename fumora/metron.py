@@ -127,7 +127,13 @@ class MetronClient:
     async def _get(self, path: str, params: dict | None = None) -> dict:
         for attempt in range(self._max_retries + 1):
             await self._limiter.acquire()
-            resp = await self._http.get(path, params=params)
+            try:
+                resp = await self._http.get(path, params=params)
+            except httpx.TransportError as exc:
+                if attempt < self._max_retries:
+                    await self._limiter.sleep(5.0 * (attempt + 1))
+                    continue
+                raise MetronError(f"Could not reach Metron ({type(exc).__name__})") from exc
             self._limiter.update(resp.headers)
             if resp.status_code == 429 and attempt < self._max_retries:
                 retry_after = resp.headers.get("retry-after")

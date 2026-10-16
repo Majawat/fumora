@@ -32,6 +32,7 @@ class ReadStats:
     issues_new: int = 0
     files_linked: int = 0
     files_missing: int = 0
+    issues_conflict: int = 0
 
 
 # Module-level so tests can stand in for the filesystem.
@@ -70,7 +71,15 @@ def upsert_mylar(
         by_cv = {i.cv_id: i for i in series.issues if i.cv_id is not None}
         by_number = {normalize_number(i.number): i for i in series.issues}
         for mi in ms.issues:
-            issue = by_cv.get(mi.cv_id) or by_number.get(normalize_number(mi.number))
+            issue = by_cv.get(mi.cv_id)
+            if issue is None:
+                same_number = by_number.get(normalize_number(mi.number))
+                if same_number is not None and same_number.cv_id is not None:
+                    # A different ComicVine issue already has this number in this
+                    # series; don't fold the two together.
+                    stats.issues_conflict += 1
+                    continue
+                issue = same_number
             if issue is None:
                 issue = Issue(
                     series=series,
@@ -199,9 +208,15 @@ async def suggest_by_name(db: Session, client: MetronClient, series: Series) -> 
     if not series.year_began:
         return None
     key = _name_key(series.name)
+    # One query per candidate year: name-only searches for common titles
+    # ("Batman") span many pages.
+    results: dict[int, dict] = {}
+    for year in (series.year_began, series.year_began - 1, series.year_began + 1):
+        for r in await client.search_series(series.name, year_began=year):
+            results[r["id"]] = r
     candidates = [
         r
-        for r in await client.search_series(series.name)
+        for r in results.values()
         if r.get("year_began") is not None
         and abs(r["year_began"] - series.year_began) <= 1
         and _name_key(re.sub(r"\s*\(\d{4}\)$", "", r.get("series") or "")) == key

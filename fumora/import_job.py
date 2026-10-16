@@ -11,7 +11,7 @@ from sqlalchemy import select
 from . import settings_store
 from .importer import import_report, log, match_series, snapshot_path, sync_series_issues, upsert_mylar
 from .jobs import JobContext
-from .metron import MetronClient, MetronDailyLimitReached, MetronError
+from .metron import MetronAuthError, MetronClient, MetronDailyLimitReached, MetronError
 from .models import Series
 from .mylar import read_mylar, snapshot
 
@@ -40,8 +40,9 @@ def make_handler(config_dir: Path, make_client: Callable[[str, str], MetronClien
         if not user or not password:
             raise RuntimeError("Metron username and password are not set")
 
-        # Phase 1: read Mylar
-        if not ctx.params().get("read_done"):
+        # Phase 1: read Mylar (skipped for jobs that only apply accepted suggestions)
+        params = ctx.params()
+        if not params.get("read_done") and not params.get("skip_read"):
             if not mylar_db.is_file():
                 raise RuntimeError(f"Mylar database not found at {mylar_db}")
             ctx.update(phase="read", message="Copying and reading Mylar's database")
@@ -54,51 +55,72 @@ def make_handler(config_dir: Path, make_client: Callable[[str, str], MetronClien
                     db,
                     f"Read Mylar: {stats.series_seen} series ({stats.series_new} new), "
                     f"{stats.issues_new} new issues, {stats.files_linked} files linked, "
-                    f"{stats.files_missing} recorded files missing on disk",
+                    f"{stats.files_missing} recorded files missing on disk, "
+                    f"{stats.issues_conflict} issues skipped (number already used by another issue)",
                 )
                 db.commit()
             ctx.update(params={**ctx.params(), "read_done": True}, message=None)
 
         async with make_client(user, password) as client:
-            # Phase 2: find each series on Metron
-            with sf() as db:
-                todo = db.scalars(
-                    select(Series.id)
-                    .where(Series.match_status.in_(("pending", "accepted")))
-                    .order_by(Series.id)
-                ).all()
-            ctx.update(phase="match", progress=0, total=len(todo))
-            for n, series_id in enumerate(todo, 1):
+            # Phases 2 and 3 repeat until nothing is left, so a suggestion
+            # accepted while this job runs is still applied by it.
+            while True:
                 with sf() as db:
-                    series = db.get(Series, series_id)
-                    try:
-                        await _with_daily_limit(ctx, lambda s=series, d=db: match_series(d, client, s))
-                    except MetronError as exc:
-                        series.match_status, series.match_note = "review", f"Metron error: {exc}"
-                    db.commit()
-                ctx.update(progress=n)
+                    to_match = db.scalars(
+                        select(Series.id)
+                        .where(Series.match_status.in_(("pending", "accepted")))
+                        .order_by(Series.id)
+                    ).all()
+                    to_sync = db.scalars(
+                        select(Series.id)
+                        .where(Series.match_status == "matched", Series.issues_synced.is_(None))
+                        .order_by(Series.id)
+                    ).all()
+                if not to_match and not to_sync:
+                    break
 
-            # Phase 3: pair issues for matched series
-            with sf() as db:
-                todo = db.scalars(
-                    select(Series.id)
-                    .where(Series.match_status == "matched", Series.issues_synced.is_(None))
-                    .order_by(Series.id)
-                ).all()
-            ctx.update(phase="issues", progress=0, total=len(todo))
-            for n, series_id in enumerate(todo, 1):
-                with sf() as db:
-                    series = db.get(Series, series_id)
-                    try:
-                        await _with_daily_limit(ctx, lambda s=series, d=db: sync_series_issues(d, client, s))
-                        series.issues_synced = datetime.now(UTC)
-                        db.commit()
-                    except MetronError as exc:
-                        db.rollback()
+                # Phase 2: find each series on Metron
+                ctx.update(phase="match", progress=0, total=len(to_match))
+                for n, series_id in enumerate(to_match, 1):
+                    with sf() as db:
                         series = db.get(Series, series_id)
-                        series.match_note = f"Issue sync failed: {exc}"
+                        try:
+                            await _with_daily_limit(ctx, lambda s=series, d=db: match_series(d, client, s))
+                        except MetronAuthError:
+                            # Wrong credentials affect every series: stop, leave them pending.
+                            raise
+                        except MetronError as exc:
+                            series.match_status, series.match_note = "review", f"Metron error: {exc}"
                         db.commit()
-                ctx.update(progress=n)
+                    ctx.update(progress=n)
+
+                # Phase 3: pair issues for matched series
+                with sf() as db:
+                    to_sync = db.scalars(
+                        select(Series.id)
+                        .where(Series.match_status == "matched", Series.issues_synced.is_(None))
+                        .order_by(Series.id)
+                    ).all()
+                ctx.update(phase="issues", progress=0, total=len(to_sync))
+                for n, series_id in enumerate(to_sync, 1):
+                    with sf() as db:
+                        series = db.get(Series, series_id)
+                        try:
+                            await _with_daily_limit(
+                                ctx, lambda s=series, d=db: sync_series_issues(d, client, s)
+                            )
+                            series.issues_synced = datetime.now(UTC)
+                            db.commit()
+                        except MetronAuthError:
+                            raise
+                        except MetronError as exc:
+                            db.rollback()
+                            series = db.get(Series, series_id)
+                            # Mark it synced-with-error so the loop does not retry it forever.
+                            series.issues_synced = datetime.now(UTC)
+                            series.match_note = f"Issue sync failed: {exc}"
+                            db.commit()
+                    ctx.update(progress=n)
 
         with sf() as db:
             r = import_report(db)
