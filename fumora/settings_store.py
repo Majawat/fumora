@@ -41,6 +41,14 @@ SETTINGS: list[SettingDef] = [
         "(TRaSH layout) so imports can hardlink or move instantly.",
     ),
     SettingDef(
+        "library.recycle_path",
+        "Recycle folder",
+        "Library",
+        default="/data/media/fumora-recycle",
+        help="Originals Fumora replaces (e.g. a CBR after converting it to CBZ) are moved here, "
+        "never deleted. Keep it outside folders Komga/Kavita/BookOrbit watch.",
+    ),
+    SettingDef(
         "mylar.db_path",
         "Mylar database",
         "Mylar import",

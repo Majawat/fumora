@@ -88,9 +88,9 @@ def test_unconfirmed_match_is_not_written(app, tmp_path):
     assert "not confirmed" in tag_file(issue, f, dry_run=False)["error"]
 
 
-def test_cbr_file_reports_error(app, tmp_path):
-    db, issue, f = _series_with_file(app, tmp_path, name="a.cbr")
-    assert "CBZ only" in tag_file(issue, f, dry_run=True)["error"]
+def test_unreadable_cbr_reports_error(app, tmp_path):
+    db, issue, f = _series_with_file(app, tmp_path, name="a.cbr")  # 3 bytes of junk
+    assert "Cannot read" in tag_file(issue, f, dry_run=True)["error"]
 
 
 def test_write_skips_files_with_nothing_to_change(app, tmp_path):

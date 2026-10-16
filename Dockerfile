@@ -8,6 +8,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PGID=100 \
     UMASK=0002
 
+# bsdtar (libarchive) unpacks CBR/CB7/CBT for conversion to CBZ.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libarchive-tools \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY fumora ./fumora
