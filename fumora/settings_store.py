@@ -39,6 +39,14 @@ SETTINGS: list[SettingDef] = [
         help="Where series folders live, as Fumora sees it. Mount one shared /data "
         "(TRaSH layout) so imports can hardlink or move instantly.",
     ),
+    SettingDef(
+        "mylar.db_path",
+        "Mylar database",
+        "Mylar import",
+        default="/mylar/mylar/mylar.db",
+        help="Path to Mylar's mylar.db. Mount Mylar's appdata folder read-only at /mylar. "
+        "Fumora only reads a copy of it.",
+    ),
 ]
 
 SETTINGS_BY_KEY = {s.key: s for s in SETTINGS}

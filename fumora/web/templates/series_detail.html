@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ s.name }} · Fumora{% endblock %}
+{% block content %}
+<p><a href="/series">← Series</a></p>
+<h1>{{ s.name }}{% if s.year_began %} ({{ s.year_began }}){% endif %}</h1>
+<dl class="facts">
+  <dt>Type</dt><dd>{{ s.series_type or s.mylar_type or "—" }}</dd>
+  <dt>Publisher</dt><dd>{{ s.publisher.name if s.publisher else "—" }}</dd>
+  <dt>Folder</dt><dd><code>{{ s.path or "—" }}</code></dd>
+  <dt>Metron</dt><dd>
+    <span class="badge {{ s.match_status }}">{{ match_labels[s.match_status] }}</span>
+    {% if s.metron_id %}<a href="https://metron.cloud/series/{{ s.metron_id }}/" target="_blank" rel="noopener">#{{ s.metron_id }}</a>{% endif %}
+    {% if s.match_note %}<small class="muted">{{ s.match_note }}</small>{% endif %}
+    {% if s.suggested_metron_id and s.match_status == "review" %}
+    <form method="post" action="/series/{{ s.id }}/accept-suggestion" class="row">
+      <span>Suggested: <a href="https://metron.cloud/series/{{ s.suggested_metron_id }}/" target="_blank" rel="noopener">Metron #{{ s.suggested_metron_id }}</a></span>
+      <button class="small">Accept suggestion</button>
+    </form>
+    {% endif %}
+  </dd>
+  <dt>ComicVine</dt><dd>{% if s.cv_id %}<a href="https://comicvine.gamespot.com/volume/4050-{{ s.cv_id }}/" target="_blank" rel="noopener">{{ s.cv_id }}</a>{% else %}—{% endif %}</dd>
+  {% if s.age_rating_override %}<dt>Age rating</dt><dd>{{ s.age_rating_override }} (set by hand)</dd>{% endif %}
+</dl>
+
+<details class="card" {% if s.match_status != "matched" or error %}open{% endif %}>
+  <summary>Match to a different Metron series</summary>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <p class="muted">Find the series on <a href="https://metron.cloud/series/?name={{ s.name|urlencode }}" target="_blank" rel="noopener">metron.cloud</a> and paste its id (the number in its URL).</p>
+  <form class="row" method="post" action="/series/{{ s.id }}/metron">
+    <input name="metron_id" inputmode="numeric" pattern="[0-9]+" required placeholder="Metron series id" aria-label="Metron series id">
+    <button>Match</button>
+  </form>
+</details>
+
+<h2>Issues ({{ issues|length }})</h2>
+<div class="scroll">
+<table class="log">
+  <thead><tr><th>#</th><th>Cover date</th><th>Status</th><th>Metron</th><th>File</th></tr></thead>
+  <tbody>
+  {% for i in issues %}
+  <tr>
+    <td>{{ i.number }}</td>
+    <td>{{ i.cover_date or "" }}</td>
+    <td>{{ i.status }}</td>
+    <td>{% if i.metron_id %}<a href="https://metron.cloud/issue/{{ i.metron_id }}/" target="_blank" rel="noopener">{{ "new" if i.match_status == "new" else "✓" }}</a>{% elif i.match_status == "unmatched" %}<span class="error">unmatched</span>{% endif %}</td>
+    <td>{% for f in i.files %}<code class="path">{{ f.path.rsplit('/', 1)[-1] }}</code>{% endfor %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

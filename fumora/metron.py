@@ -127,7 +127,13 @@ class MetronClient:
     async def _get(self, path: str, params: dict | None = None) -> dict:
         for attempt in range(self._max_retries + 1):
             await self._limiter.acquire()
-            resp = await self._http.get(path, params=params)
+            try:
+                resp = await self._http.get(path, params=params)
+            except httpx.TransportError as exc:
+                if attempt < self._max_retries:
+                    await self._limiter.sleep(5.0 * (attempt + 1))
+                    continue
+                raise MetronError(f"Could not reach Metron ({type(exc).__name__})") from exc
             self._limiter.update(resp.headers)
             if resp.status_code == 429 and attempt < self._max_retries:
                 retry_after = resp.headers.get("retry-after")
@@ -143,13 +149,15 @@ class MetronClient:
             return resp.json()
         raise MetronError(f"Metron {path} failed after {self._max_retries} retries")
 
-    async def _paged(self, path: str, params: dict | None = None) -> AsyncIterator[dict]:
+    async def _paged(
+        self, path: str, params: dict | None = None, max_pages: int | None = None
+    ) -> AsyncIterator[dict]:
         page = 1
         while True:
             data = await self._get(path, {**(params or {}), "page": page})
             for item in data.get("results", []):
                 yield item
-            if not data.get("next"):
+            if not data.get("next") or (max_pages is not None and page >= max_pages):
                 return
             page += 1
 
@@ -159,8 +167,11 @@ class MetronClient:
         """Cheap authenticated call; raises MetronAuthError on bad credentials."""
         await self._get("series_type/")
 
-    async def search_series(self, name: str) -> list[dict]:
-        return [s async for s in self._paged("series/", {"name": name})]
+    async def search_series(self, name: str, year_began: int | None = None, max_pages: int = 2) -> list[dict]:
+        params: dict = {"name": name}
+        if year_began is not None:
+            params["year_began"] = year_began
+        return [s async for s in self._paged("series/", params, max_pages=max_pages)]
 
     async def series_by_cv_id(self, cv_id: int) -> dict | None:
         data = await self._get("series/", {"cv_id": cv_id})

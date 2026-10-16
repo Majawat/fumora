@@ -1,0 +1,110 @@
+"""In-process background jobs, persisted in the `job` table.
+
+A job that was running when the app stopped is started again on the next
+startup; job handlers are written to be idempotent so they just continue.
+"""
+
+import asyncio
+import logging
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
+
+from sqlalchemy import select
+from sqlalchemy.orm import sessionmaker
+
+from .models import Event, Job
+
+log = logging.getLogger("fumora.jobs")
+
+
+class JobContext:
+    def __init__(self, job_id: int, session_factory: sessionmaker):
+        self.job_id = job_id
+        self.session_factory = session_factory
+
+    def update(self, **fields) -> None:
+        with self.session_factory() as db:
+            job = db.get(Job, self.job_id)
+            for key, value in fields.items():
+                setattr(job, key, value)
+            db.commit()
+
+    def params(self) -> dict:
+        with self.session_factory() as db:
+            return dict(db.get(Job, self.job_id).params or {})
+
+
+Handler = Callable[[JobContext], Awaitable[str | None]]
+
+
+class JobRunner:
+    def __init__(self, session_factory: sessionmaker):
+        self.session_factory = session_factory
+        self.handlers: dict[str, Handler] = {}
+        self._tasks: dict[int, asyncio.Task] = {}
+
+    def register(self, kind: str, handler: Handler) -> None:
+        self.handlers[kind] = handler
+
+    def active(self, kind: str) -> Job | None:
+        with self.session_factory() as db:
+            return db.scalar(
+                select(Job)
+                .where(Job.kind == kind, Job.state.in_(("queued", "running")))
+                .order_by(Job.id.desc())
+            )
+
+    def latest(self, kind: str) -> Job | None:
+        with self.session_factory() as db:
+            return db.scalar(select(Job).where(Job.kind == kind).order_by(Job.id.desc()))
+
+    def start(self, kind: str, params: dict | None = None) -> int:
+        """Start a job, or return the one of this kind already running."""
+        existing = self.active(kind)
+        if existing is not None:
+            return existing.id
+        with self.session_factory() as db:
+            job = Job(kind=kind, state="queued", params=params or {})
+            db.add(job)
+            db.commit()
+            job_id = job.id
+        self._spawn(job_id, kind)
+        return job_id
+
+    def resume_all(self) -> None:
+        with self.session_factory() as db:
+            jobs = db.scalars(select(Job).where(Job.state.in_(("queued", "running")))).all()
+            pending = [(j.id, j.kind) for j in jobs]
+        for job_id, kind in pending:
+            self._spawn(job_id, kind)
+
+    async def shutdown(self) -> None:
+        for task in self._tasks.values():
+            task.cancel()
+        await asyncio.gather(*self._tasks.values(), return_exceptions=True)
+
+    def _spawn(self, job_id: int, kind: str) -> None:
+        self._tasks[job_id] = asyncio.create_task(self._run(job_id, kind))
+
+    async def _run(self, job_id: int, kind: str) -> None:
+        ctx = JobContext(job_id, self.session_factory)
+        handler = self.handlers.get(kind)
+        if handler is None:
+            ctx.update(state="failed", message=f"No handler for job kind '{kind}'")
+            return
+        ctx.update(state="running", started=datetime.now(UTC))
+        try:
+            summary = await handler(ctx)
+        except asyncio.CancelledError:
+            # App shutting down: leave it 'running' so the next start resumes it.
+            raise
+        except Exception as exc:
+            log.exception("job %s (%s) failed", job_id, kind)
+            ctx.update(state="failed", finished=datetime.now(UTC), message=f"{type(exc).__name__}: {exc}")
+            with self.session_factory() as db:
+                db.add(Event(kind=kind, level="error", message=f"Job failed: {exc}"))
+                db.commit()
+        else:
+            ctx.update(state="done", finished=datetime.now(UTC), message=summary)
+        finally:
+            self._tasks.pop(job_id, None)

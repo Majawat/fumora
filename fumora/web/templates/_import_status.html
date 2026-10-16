@@ -1,0 +1,25 @@
+{% set running = job and job.state in ("queued", "running") %}
+<section class="card" {% if running %}hx-get="/import/status" hx-trigger="every 3s" hx-swap="outerHTML" hx-select="section.card"{% endif %}>
+  {% if job %}
+  <p><strong>Last run:</strong> {{ job.state }}{% if job.phase %} · {{ job.phase }}{% endif %}
+    {% if running and job.total %} · {{ job.progress }}/{{ job.total }}{% endif %}</p>
+  {% if running and job.total %}<progress max="{{ job.total }}" value="{{ job.progress }}"></progress>{% endif %}
+  {% if job.message %}<p class="{{ 'error' if job.state == 'failed' else 'muted' }}">{{ job.message }}</p>{% endif %}
+  {% else %}
+  <p class="muted">Not run yet.</p>
+  {% endif %}
+
+  <div class="stats">
+    <div class="stat"><span>{{ report.series_matched }}/{{ report.series_total }}</span>Series matched</div>
+    <div class="stat"><span>{{ report.series_review + report.series_not_found }}</span>Need attention</div>
+    <div class="stat"><span>{{ report.issues_matched }}</span>Issues matched</div>
+    <div class="stat"><span>{{ report.issues_unmatched }}</span>Issues unmatched</div>
+    <div class="stat"><span>{{ report.issues_new }}</span>New from Metron</div>
+    <div class="stat"><span>{{ report.files }}</span>Files linked</div>
+    <div class="stat"><span>{{ missing_files }}</span>Downloaded, no file</div>
+  </div>
+
+  {% if not running %}
+  <p><button hx-post="/import/start" hx-target="closest section" hx-swap="outerHTML">{{ "Run again" if job else "Start import" }}</button></p>
+  {% endif %}
+</section>
