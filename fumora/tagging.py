@@ -5,11 +5,13 @@ from datetime import UTC, date, datetime
 
 from sqlalchemy.orm import Session
 
-from . import __version__, cbz
+from . import __version__, cbz, convert
 from .comicinfo import IssueMeta, build_metroninfo, merge_comicinfo
 from .metron import MetronClient
 from .models import File, Issue, Series
 from .ratings import TO_COMICINFO, issue_rating
+
+DEFAULT_RECYCLE = "/data/media/fumora-recycle"
 
 
 class NotWritable(Exception):
@@ -114,8 +116,8 @@ async def ensure_detail(db: Session, client: MetronClient, issue: Issue) -> None
 def check_writable(series: Series, file: File) -> None:
     if not series.writable:
         raise NotWritable("Metron match not confirmed")
-    if not cbz.is_cbz(file.path):
-        raise NotWritable(f"{file.path.rsplit('.', 1)[-1].upper()} files can't be tagged (CBZ only)")
+    if not cbz.is_cbz(file.path) and not convert.needs_conversion(file.path):
+        raise NotWritable(f"{file.path.rsplit('.', 1)[-1].upper()} files can't be tagged")
 
 
 def _without_notes(xml: bytes) -> bytes:
@@ -139,7 +141,12 @@ def _without_notes(xml: bytes) -> bytes:
 def plan_file(issue: Issue, file: File) -> tuple[dict[str, bytes], dict[str, tuple]]:
     """New metadata files for `file` and the ComicInfo fields that would change."""
     check_writable(issue.series, file)
-    comicinfo, metroninfo, _pages = cbz.read_metadata(file.path)
+    converting = convert.needs_conversion(file.path)
+    if converting and convert.sniff(file.path) != "zip":
+        comicinfo = convert.read_member(file.path, cbz.COMICINFO)
+        metroninfo = convert.read_member(file.path, cbz.METRONINFO)
+    else:
+        comicinfo, metroninfo, _pages = cbz.read_metadata(file.path)
     meta = issue_meta(issue)
     new_ci, changes = merge_comicinfo(comicinfo, meta)
     files = {cbz.COMICINFO: new_ci}
@@ -152,20 +159,27 @@ def plan_file(issue: Issue, file: File) -> tuple[dict[str, bytes], dict[str, tup
             changes["MetronInfo.xml"] = ("", "updated")
     # "Notes" always changes (it carries the tagging date); not worth showing alone.
     meaningful = {k: v for k, v in changes.items() if k != "Notes"}
+    if converting:
+        meaningful["File"] = (file.path.rsplit(".", 1)[-1].upper(), "converted to CBZ")
     return files, meaningful
 
 
-def tag_file(issue: Issue, file: File, dry_run: bool) -> dict:
-    """Preview (dry run) or write one file. Returns what is stored in file.tag_preview."""
+def tag_file(issue: Issue, file: File, dry_run: bool, recycle_dir: str = DEFAULT_RECYCLE) -> dict:
+    """Preview (dry run) or write one file. Returns what is stored in file.tag_preview.
+
+    CBR/CB7/CBT files are converted to CBZ first (originals go to the recycle folder).
+    """
     try:
         files, changes = plan_file(issue, file)
         # Only rewrite when something real changes: a rewrite copies the whole
         # archive, makes readers rescan it and breaks torrent hardlinks.
         if not dry_run and changes:
+            if "File" in changes:
+                file.path = str(convert.convert_to_cbz(file.path, recycle_dir))
             cbz.write_metadata(file.path, files)
             file.tagged_at = datetime.now(UTC)
         result = {"fields": {k: list(v) for k, v in changes.items()}, "error": None}
-    except (NotWritable, cbz.ArchiveError, OSError) as exc:
+    except (NotWritable, cbz.ArchiveError, OSError) as exc:  # convert raises ArchiveError too
         result = {"fields": {}, "error": str(exc)}
     result["dry_run"] = dry_run
     result["at"] = datetime.now(UTC).isoformat()

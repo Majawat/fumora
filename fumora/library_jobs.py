@@ -49,6 +49,7 @@ def make_retag_handler(make_client: Callable[[str, str], MetronClient]):
         with sf() as db:
             user = settings_store.get(db, "metron.username")
             password = settings_store.get(db, "metron.password")
+            recycle = settings_store.get(db, "library.recycle_path")
             q = select(Issue.id).join(Series).where(Issue.files.any()).order_by(Series.id, Issue.sort_number)
             if ids:
                 q = q.where(Series.id.in_(ids))
@@ -97,7 +98,7 @@ def make_retag_handler(make_client: Callable[[str, str], MetronClient]):
                             break
                     for f in issue.files:
                         # File I/O off the event loop: archives can be large.
-                        result = await asyncio.to_thread(tag_file, issue, f, dry_run)
+                        result = await asyncio.to_thread(tag_file, issue, f, dry_run, recycle)
                         if result["error"]:
                             counts["errors"] += 1
                         elif result["fields"]:
