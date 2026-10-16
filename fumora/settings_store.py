@@ -19,6 +19,7 @@ class SettingDef:
     secret: bool = False
     default: str | None = None
     help: str = ""
+    choices: tuple[tuple[str, str], ...] = ()
 
 
 SETTINGS: list[SettingDef] = [
@@ -46,6 +47,44 @@ SETTINGS: list[SettingDef] = [
         default="/mylar/mylar/mylar.db",
         help="Path to Mylar's mylar.db. Mount Mylar's appdata folder read-only at /mylar. "
         "Fumora only reads a copy of it.",
+    ),
+]
+
+# Naming (Sonarr-style templates). Defaults reproduce Mylar's scheme.
+SETTINGS += [
+    SettingDef(
+        "naming.folder_template",
+        "Series folder",
+        "Naming",
+        default="{Series Title} ({Series Year})",
+        help="Tokens: {Series Title} {Series TitleThe} {Series Year} {Volume} {Publisher} "
+        "{Series Type} {Format}",
+    ),
+    SettingDef(
+        "naming.file_template",
+        "Issue file",
+        "Naming",
+        default="{Series Title} {Issue:000} ({Issue Year})",
+        help="Also: {Issue} {Issue:000} {Issue Title} {Issue Year} {Issue Month:00} {Metron Id}. "
+        "The file extension is added automatically.",
+    ),
+    SettingDef(
+        "naming.collected_template",
+        "Collected editions file (optional)",
+        "Naming",
+        help="Used for TPB, hardcover, omnibus and graphic novel series instead of the issue template.",
+    ),
+    SettingDef(
+        "naming.colon",
+        "Colons become",
+        "Naming",
+        default="delete",
+        choices=(
+            ("delete", "nothing (Mylar)"),
+            ("dash", "-"),
+            ("space_dash", " -"),
+            ("space_dash_space", " - "),
+        ),
     ),
 ]
 

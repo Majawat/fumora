@@ -1,0 +1,221 @@
+{
+    "id": 186450,
+    "publisher": {
+        "id": 261,
+        "name": "Space Between Entertainment"
+    },
+    "imprint": null,
+    "series": {
+        "id": 17753,
+        "name": "Private Dance",
+        "alt_names": [],
+        "sort_name": "Private Dance",
+        "volume": 1,
+        "year_began": 2023,
+        "series_type": {
+            "id": 13,
+            "name": "Single Issue"
+        },
+        "genres": [],
+        "language": "en"
+    },
+    "number": "1",
+    "alt_number": "",
+    "title": "",
+    "name": [],
+    "cover_date": "2023-09-01",
+    "store_date": null,
+    "foc_date": null,
+    "price": null,
+    "price_currency": "",
+    "rating": {
+        "id": 1,
+        "name": "Unknown"
+    },
+    "sku": "",
+    "isbn": "",
+    "upc": "",
+    "page": 32,
+    "desc": "The team behind THIRSTY and CHEEKY delivers a funny, sexy, & exciting new comic series about the dancers at a New York strip club.\r\n\r\nPrivate Dance is an ADULTS ONLY comic that takes you into a New York strip club as we meet the dancers, customers, and bouncers, discovering that there is more to the fantasy than meets the eye.\r\n\r\nAt work, they create a fantasy for customers that you have to see to believe. However, when we take a closer look, there are a world of stories to explore in the real lives of these dancers.",
+    "desc_is_solicitation": false,
+    "image": "https://static.metron.cloud/media/issue/2026/10/15/Private_Dance_01_-_Cover_A1.jpg",
+    "cover_hash": "dd126cf094bc784e",
+    "average_rating": null,
+    "rating_count": 0,
+    "arcs": [],
+    "credits": [
+        {
+            "id": 6923,
+            "creator": "Conor Hughes",
+            "role": [
+                {
+                    "id": 7,
+                    "name": "Cover"
+                }
+            ]
+        },
+        {
+            "id": 11847,
+            "creator": "Elise Pocetta",
+            "role": [
+                {
+                    "id": 2,
+                    "name": "Artist"
+                }
+            ]
+        },
+        {
+            "id": 20089,
+            "creator": "Emily Chow",
+            "role": [
+                {
+                    "id": 7,
+                    "name": "Cover"
+                }
+            ]
+        },
+        {
+            "id": 6924,
+            "creator": "Fin Cramb",
+            "role": [
+                {
+                    "id": 7,
+                    "name": "Cover"
+                }
+            ]
+        },
+        {
+            "id": 20090,
+            "creator": "Irina Arty",
+            "role": [
+                {
+                    "id": 2,
+                    "name": "Artist"
+                }
+            ]
+        },
+        {
+            "id": 11823,
+            "creator": "James Offredi",
+            "role": [
+                {
+                    "id": 5,
+                    "name": "Colorist"
+                }
+            ]
+        },
+        {
+            "id": 364,
+            "creator": "Jim Campbell",
+            "role": [
+                {
+                    "id": 6,
+                    "name": "Letterer"
+                }
+            ]
+        },
+        {
+            "id": 7897,
+            "creator": "Joe Pekar",
+            "role": [
+                {
+                    "id": 7,
+                    "name": "Cover"
+                }
+            ]
+        },
+        {
+            "id": 5575,
+            "creator": "Leirix Li",
+            "role": [
+                {
+                    "id": 7,
+                    "name": "Cover"
+                }
+            ]
+        },
+        {
+            "id": 20091,
+            "creator": "Manos Lagouvardos",
+            "role": [
+                {
+                    "id": 7,
+                    "name": "Cover"
+                }
+            ]
+        },
+        {
+            "id": 6919,
+            "creator": "Pat Shand",
+            "role": [
+                {
+                    "id": 1,
+                    "name": "Writer"
+                }
+            ]
+        },
+        {
+            "id": 686,
+            "creator": "Yishan Li",
+            "role": [
+                {
+                    "id": 2,
+                    "name": "Artist"
+                }
+            ]
+        }
+    ],
+    "characters": [],
+    "teams": [],
+    "universes": [],
+    "reprints": [],
+    "variants": [
+        {
+            "name": "Cover B (by Celtis)",
+            "price": null,
+            "sku": "",
+            "upc": "",
+            "image": "https://static.metron.cloud/media/variants/2026/10/15/Private_Dance_01_-_Cover_B1.jpg"
+        },
+        {
+            "name": "Cover C (by Ganassa)",
+            "price": null,
+            "sku": "",
+            "upc": "",
+            "image": "https://static.metron.cloud/media/variants/2026/10/15/Private_Dance_01_-_Cover_C1.jpg"
+        },
+        {
+            "name": "Cover D (by Joe Pekar)",
+            "price": null,
+            "sku": "",
+            "upc": "",
+            "image": "https://static.metron.cloud/media/variants/2026/10/15/Private_Dance_01_-_Cover_D1.jpg"
+        },
+        {
+            "name": "Cover G (by Othalam)",
+            "price": null,
+            "sku": "",
+            "upc": "",
+            "image": "https://static.metron.cloud/media/variants/2026/10/15/Private_Dance_01_-_Cover_G1.jpg"
+        },
+        {
+            "name": "Cover I (EXXXOTICA 2023 Exclusive - Sweet - by Leirix)",
+            "price": null,
+            "sku": "",
+            "upc": "",
+            "image": "https://static.metron.cloud/media/variants/2026/10/15/Private_Dance_01_-_Cover_I_EXXXOTICA_20231.jpg"
+        },
+        {
+            "name": "Cover M (NYCC 2024 Exclusive - by Yishan Li)",
+            "price": null,
+            "sku": "",
+            "upc": "",
+            "image": "https://static.metron.cloud/media/variants/2026/10/15/Private_Dance_01_-_Cover_M_NYCC_20241.png"
+        }
+    ],
+    "cv_id": 1094277,
+    "gcd_id": 2580081,
+    "resource_url": "https://metron.cloud/issue/private-dance-2023-1/",
+    "modified": "2026-10-15T14:14:25.515127-04:00",
+    "attribution": []
+}

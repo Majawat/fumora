@@ -16,6 +16,7 @@ from .db import make_engine, make_session_factory, upgrade_db
 from .import_job import KIND as MYLAR_IMPORT
 from .import_job import make_handler as make_import_handler
 from .jobs import JobRunner
+from .library_jobs import ORGANIZE, RETAG, SCAN, make_organize_handler, make_retag_handler, make_scan_handler
 from .metron import MetronAuthError, MetronClient, MetronError, RateLimiter
 from .models import Event, Issue, Series, User
 from .web.library import register_library_routes
@@ -39,6 +40,9 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     jobs = JobRunner(SessionLocal)
     jobs.register(MYLAR_IMPORT, make_import_handler(config.config_dir, make_metron_client))
+    jobs.register(SCAN, make_scan_handler())
+    jobs.register(RETAG, make_retag_handler(make_metron_client))
+    jobs.register(ORGANIZE, make_organize_handler())
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):

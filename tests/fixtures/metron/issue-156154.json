@@ -1,0 +1,574 @@
+{
+    "id": 156154,
+    "publisher": {
+        "id": 2,
+        "name": "DC Comics"
+    },
+    "imprint": null,
+    "series": {
+        "id": 13653,
+        "name": "Batman: Fear State Saga",
+        "alt_names": [],
+        "sort_name": "Batman: Fear State Saga",
+        "volume": 1,
+        "year_began": 2022,
+        "series_type": {
+            "id": 10,
+            "name": "Trade Paperback"
+        },
+        "genres": [
+            {
+                "id": 10,
+                "name": "Super-Hero"
+            }
+        ],
+        "language": "en"
+    },
+    "number": "1",
+    "alt_number": "",
+    "title": "",
+    "name": [
+        "Fear State: Alpha",
+        "Fear State, Part 1",
+        "Peacekeeper-01",
+        "Fear State, Part 2",
+        "Fear State, Part 3",
+        "Miracle Molly",
+        "Fear State, Part 4",
+        "Fear State, Part 5",
+        "The Gardener",
+        "Fear State, Finale",
+        "Fear State, Omega"
+    ],
+    "cover_date": "2023-06-01",
+    "store_date": "2023-04-18",
+    "foc_date": null,
+    "price": "29.99",
+    "price_currency": "USD",
+    "rating": {
+        "id": 1,
+        "name": "Unknown"
+    },
+    "sku": "0123DC207",
+    "isbn": "9781779520036",
+    "upc": "",
+    "page": 320,
+    "desc": "The Batman: Fear State Event brilliantly collected.\r\n\r\nGotham City is on the brink of martial law as Batman fights a two-front battle! The Scarecrow is unleashing a devasting attack on the city while the Magistrate have made their move to invade! Gotham City is on the brink of a violent evolutionary path and the danger level to Batman and his allies reaching a fever pitch.\r\n\r\nThe Magistrate now have full support from the mayor to handle high-level law enforcement in Gotham and have branded the Dark Knight as Public Enemy #1. Batman must also contend with the return of the Scarecrow who pursues his own terrifying agenda as he takes this chaotic moment to launch his FEAR STATE.\r\n\r\nAnd that's just the start of the Dark Knights twisted tale in Batman: Fear State Saga collecting Batman #112-117; Batman Secret Files: The Gardener #1; Batman Secret Files: Peacekeeper #1; Batman Secret Files: Miracle Molly #1; Batman: Fear State: Alpha #1; Batman: Fear State: Omega #1!",
+    "desc_is_solicitation": false,
+    "image": "https://static.metron.cloud/media/issue/2025/10/13/11845486e09e4849b506f9b9b469ffb8.jpg",
+    "cover_hash": "a914f5f5c2696546",
+    "average_rating": null,
+    "rating_count": 0,
+    "arcs": [],
+    "credits": [
+        {
+            "id": 303,
+            "creator": "Amedeo Turturro",
+            "role": [
+                {
+                    "id": 8,
+                    "name": "Editor"
+                }
+            ]
+        },
+        {
+            "id": 1190,
+            "creator": "Ben Abernathy",
+            "role": [
+                {
+                    "id": 8,
+                    "name": "Editor"
+                },
+                {
+                    "id": 41,
+                    "name": "Collection Editor"
+                }
+            ]
+        },
+        {
+            "id": 804,
+            "creator": "Bengal",
+            "role": [
+                {
+                    "id": 2,
+                    "name": "Artist"
+                }
+            ]
+        },
+        {
+            "id": 3096,
+            "creator": "Ben Meares",
+            "role": [
+                {
+                    "id": 9,
+                    "name": "Associate Editor"
+                }
+            ]
+        },
+        {
+            "id": 822,
+            "creator": "Ben Oliver",
+            "role": [
+                {
+                    "id": 7,
+                    "name": "Cover"
+                }
+            ]
+        },
+        {
+            "id": 519,
+            "creator": "Chris Sotomayor",
+            "role": [
+                {
+                    "id": 5,
+                    "name": "Colorist"
+                }
+            ]
+        },
+        {
+            "id": 505,
+            "creator": "Christian Duce",
+            "role": [
+                {
+                    "id": 2,
+                    "name": "Artist"
+                }
+            ]
+        },
+        {
+            "id": 841,
+            "creator": "Christian Ward",
+            "role": [
+                {
+                    "id": 2,
+                    "name": "Artist"
+                },
+                {
+                    "id": 5,
+                    "name": "Colorist"
+                }
+            ]
+        },
+        {
+            "id": 5,
+            "creator": "Clayton Cowles",
+            "role": [
+                {
+                    "id": 6,
+                    "name": "Letterer"
+                }
+            ]
+        },
+        {
+            "id": 2742,
+            "creator": "Dani Strips",
+            "role": [
+                {
+                    "id": 2,
+                    "name": "Artist"
+                }
+            ]
+        },
+        {
+            "id": 179,
+            "creator": "Dave Wielgosz",
+            "role": [
+                {
+                    "id": 9,
+                    "name": "Associate Editor"
+                }
+            ]
+        },
+        {
+            "id": 939,
+            "creator": "Ed Brisson",
+            "role": [
+                {
+                    "id": 1,
+                    "name": "Writer"
+                }
+            ]
+        },
+        {
+            "id": 6355,
+            "creator": "Erin Vanover",
+            "role": [
+                {
+                    "id": 14,
+                    "name": "Production"
+                }
+            ]
+        },
+        {
+            "id": 726,
+            "creator": "Guillem March",
+            "role": [
+                {
+                    "id": 2,
+                    "name": "Artist"
+                }
+            ]
+        },
+        {
+            "id": 99,
+            "creator": "James Tynion IV",
+            "role": [
+                {
+                    "id": 1,
+                    "name": "Writer"
+                }
+            ]
+        },
+        {
+            "id": 172,
+            "creator": "Jim Lee",
+            "role": [
+                {
+                    "id": 31,
+                    "name": "Publisher"
+                },
+                {
+                    "id": 18,
+                    "name": "Chief Creative Officer"
+                }
+            ]
+        },
+        {
+            "id": 386,
+            "creator": "Jorge Jim\u00e9nez",
+            "role": [
+                {
+                    "id": 2,
+                    "name": "Artist"
+                }
+            ]
+        },
+        {
+            "id": 6227,
+            "creator": "Joshua Hixson",
+            "role": [
+                {
+                    "id": 2,
+                    "name": "Artist"
+                }
+            ]
+        },
+        {
+            "id": 892,
+            "creator": "Lee Loughridge",
+            "role": [
+                {
+                    "id": 2,
+                    "name": "Artist"
+                }
+            ]
+        },
+        {
+            "id": 59,
+            "creator": "Marie Javins",
+            "role": [
+                {
+                    "id": 20,
+                    "name": "Editor In Chief"
+                }
+            ]
+        },
+        {
+            "id": 4779,
+            "creator": "Megen Bellersen",
+            "role": [
+                {
+                    "id": 15,
+                    "name": "Designer"
+                }
+            ]
+        },
+        {
+            "id": 181,
+            "creator": "Riccardo Federici",
+            "role": [
+                {
+                    "id": 2,
+                    "name": "Artist"
+                }
+            ]
+        },
+        {
+            "id": 5565,
+            "creator": "Roman Stevens",
+            "role": [
+                {
+                    "id": 5,
+                    "name": "Colorist"
+                }
+            ]
+        },
+        {
+            "id": 1293,
+            "creator": "Ryan Benjamin",
+            "role": [
+                {
+                    "id": 2,
+                    "name": "Artist"
+                }
+            ]
+        },
+        {
+            "id": 449,
+            "creator": "Tomeu Morey",
+            "role": [
+                {
+                    "id": 5,
+                    "name": "Colorist"
+                }
+            ]
+        },
+        {
+            "id": 62,
+            "creator": "Tom Napolitano",
+            "role": [
+                {
+                    "id": 6,
+                    "name": "Letterer"
+                }
+            ]
+        },
+        {
+            "id": 281,
+            "creator": "Travis Lanham",
+            "role": [
+                {
+                    "id": 6,
+                    "name": "Letterer"
+                }
+            ]
+        },
+        {
+            "id": 1049,
+            "creator": "Trevor Hairsine",
+            "role": [
+                {
+                    "id": 2,
+                    "name": "Artist"
+                }
+            ]
+        }
+    ],
+    "characters": [
+        {
+            "id": 518,
+            "name": "Amanda Waller",
+            "modified": "2026-10-07T07:41:25.535429-04:00"
+        },
+        {
+            "id": 275,
+            "name": "Barbara Gordon",
+            "modified": "2026-10-11T22:46:05.977261-04:00"
+        },
+        {
+            "id": 12,
+            "name": "Batman",
+            "modified": "2026-10-15T13:43:10.618382-04:00"
+        },
+        {
+            "id": 1118,
+            "name": "Batwoman",
+            "modified": "2026-09-17T01:02:27.120703-04:00"
+        },
+        {
+            "id": 1123,
+            "name": "Calendar Man",
+            "modified": "2026-09-25T08:20:52.915440-04:00"
+        },
+        {
+            "id": 1119,
+            "name": "Cassandra Cain",
+            "modified": "2026-10-04T11:05:15.852913-04:00"
+        },
+        {
+            "id": 77,
+            "name": "Catwoman",
+            "modified": "2026-10-14T09:47:56.212539-04:00"
+        },
+        {
+            "id": 26304,
+            "name": "Christopher Nakano",
+            "modified": "2024-03-05T09:16:44.068459-05:00"
+        },
+        {
+            "id": 8971,
+            "name": "Clownhunter",
+            "modified": "2021-08-11T23:11:56.265961-04:00"
+        },
+        {
+            "id": 293,
+            "name": "Dick Grayson",
+            "modified": "2026-10-14T14:39:00.402334-04:00"
+        },
+        {
+            "id": 4443,
+            "name": "Ghost-Maker (DC)",
+            "modified": "2026-07-29T09:32:28.499180-04:00"
+        },
+        {
+            "id": 16,
+            "name": "Harley Quinn",
+            "modified": "2026-09-25T08:19:51.901033-04:00"
+        },
+        {
+            "id": 10615,
+            "name": "Jacosta Joy",
+            "modified": "2021-10-07T09:25:20.647718-04:00"
+        },
+        {
+            "id": 82,
+            "name": "James Gordon",
+            "modified": "2026-10-15T13:43:10.618382-04:00"
+        },
+        {
+            "id": 296,
+            "name": "Jason Todd",
+            "modified": "2026-09-17T01:02:27.120703-04:00"
+        },
+        {
+            "id": 1126,
+            "name": "Jeremiah Arkham",
+            "modified": "2025-11-09T12:30:42.840247-05:00"
+        },
+        {
+            "id": 83,
+            "name": "Joker",
+            "modified": "2026-10-15T08:20:32.431902-04:00"
+        },
+        {
+            "id": 763,
+            "name": "Killer Croc",
+            "modified": "2026-09-25T08:19:39.635026-04:00"
+        },
+        {
+            "id": 256,
+            "name": "Lucius Fox",
+            "modified": "2026-09-08T16:02:21.020654-04:00"
+        },
+        {
+            "id": 257,
+            "name": "Mad Hatter",
+            "modified": "2026-10-12T08:51:46.708237-04:00"
+        },
+        {
+            "id": 6513,
+            "name": "Miracle Molly",
+            "modified": "2021-05-04T10:23:59.038057-04:00"
+        },
+        {
+            "id": 10684,
+            "name": "Peacekeeper-01",
+            "modified": "2021-10-11T08:17:33.081476-04:00"
+        },
+        {
+            "id": 9831,
+            "name": "Peacekeeper-X",
+            "modified": "2021-09-07T08:45:32.077991-04:00"
+        },
+        {
+            "id": 22,
+            "name": "Poison Ivy",
+            "modified": "2026-10-07T07:49:33.329725-04:00"
+        },
+        {
+            "id": 1163,
+            "name": "Renee Montoya",
+            "modified": "2026-10-07T07:29:01.988488-04:00"
+        },
+        {
+            "id": 280,
+            "name": "Scarecrow (DC)",
+            "modified": "2026-09-25T08:19:51.901033-04:00"
+        },
+        {
+            "id": 29668,
+            "name": "Simon Saint",
+            "modified": "2024-07-17T08:56:49.873316-04:00"
+        },
+        {
+            "id": 1121,
+            "name": "Stephanie Brown",
+            "modified": "2026-10-14T09:38:34.499922-04:00"
+        },
+        {
+            "id": 415,
+            "name": "Talia al Ghul",
+            "modified": "2026-10-05T16:55:44.651979-04:00"
+        },
+        {
+            "id": 10224,
+            "name": "The Gardener",
+            "modified": "2026-02-17T20:29:31.817765-05:00"
+        },
+        {
+            "id": 1109,
+            "name": "The Signal",
+            "modified": "2026-10-14T09:41:02.555402-04:00"
+        }
+    ],
+    "teams": [
+        {
+            "id": 1756,
+            "name": "Batman Family",
+            "modified": "2026-10-05T16:55:50.586072-04:00"
+        }
+    ],
+    "universes": [],
+    "reprints": [
+        {
+            "id": 37060,
+            "issue": "Batman (2016) #112"
+        },
+        {
+            "id": 37444,
+            "issue": "Batman (2016) #113"
+        },
+        {
+            "id": 38660,
+            "issue": "Batman (2016) #114"
+        },
+        {
+            "id": 39384,
+            "issue": "Batman (2016) #115"
+        },
+        {
+            "id": 39804,
+            "issue": "Batman (2016) #116"
+        },
+        {
+            "id": 40244,
+            "issue": "Batman (2016) #117"
+        },
+        {
+            "id": 36509,
+            "issue": "Batman: Fear State: Alpha (2021) #1"
+        },
+        {
+            "id": 40977,
+            "issue": "Batman: Fear State: Omega (2022) #1"
+        },
+        {
+            "id": 37453,
+            "issue": "Batman Secret Files: Miracle Molly (2021) #1"
+        },
+        {
+            "id": 39387,
+            "issue": "Batman Secret Files: Peacekeeper-01 (2021) #1"
+        },
+        {
+            "id": 40245,
+            "issue": "Batman Secret Files: The Gardener (2022) #1"
+        }
+    ],
+    "variants": [],
+    "cv_id": null,
+    "gcd_id": 2520611,
+    "resource_url": "https://metron.cloud/issue/batman-fear-state-saga-2022-1/",
+    "modified": "2025-10-13T12:26:55.449190-04:00",
+    "attribution": []
+}

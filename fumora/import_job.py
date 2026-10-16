@@ -9,7 +9,15 @@ from pathlib import Path
 from sqlalchemy import select
 
 from . import settings_store
-from .importer import import_report, log, match_series, snapshot_path, sync_series_issues, upsert_mylar
+from .importer import (
+    import_report,
+    log,
+    match_series,
+    review_confirmations,
+    snapshot_path,
+    sync_series_issues,
+    upsert_mylar,
+)
 from .jobs import JobContext
 from .metron import MetronAuthError, MetronClient, MetronDailyLimitReached, MetronError
 from .models import Series
@@ -123,12 +131,15 @@ def make_handler(config_dir: Path, make_client: Callable[[str, str], MetronClien
                     ctx.update(progress=n)
 
         with sf() as db:
+            review_confirmations(db)
+            db.commit()
             r = import_report(db)
             summary = (
                 f"{r['series_matched']}/{r['series_total']} series matched, "
                 f"{r['series_review']} need review, {r['series_not_found']} not on Metron; "
                 f"{r['issues_matched']} issues matched, {r['issues_unmatched']} unmatched, "
-                f"{r['issues_new']} new from Metron"
+                f"{r['issues_new']} new from Metron; "
+                f"{r['series_unconfirmed']} matches need confirming"
             )
             log(db, f"Mylar import finished: {summary}")
             db.commit()

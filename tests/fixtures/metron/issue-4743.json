@@ -1,0 +1,158 @@
+{
+    "id": 4743,
+    "publisher": {
+        "id": 2,
+        "name": "DC Comics"
+    },
+    "imprint": null,
+    "series": {
+        "id": 537,
+        "name": "Watchmen",
+        "alt_names": [],
+        "sort_name": "Watchmen",
+        "volume": 1,
+        "year_began": 1986,
+        "series_type": {
+            "id": 11,
+            "name": "Limited Series"
+        },
+        "genres": [],
+        "language": "en"
+    },
+    "number": "1",
+    "alt_number": "",
+    "title": "",
+    "name": [
+        "At Midnight, All The Agents..."
+    ],
+    "cover_date": "1986-09-01",
+    "store_date": "1986-05-13",
+    "foc_date": null,
+    "price": "1.50",
+    "price_currency": "USD",
+    "rating": {
+        "id": 1,
+        "name": "Unknown"
+    },
+    "sku": "",
+    "isbn": "",
+    "upc": "",
+    "page": 36,
+    "desc": "Featuring the first appearance of Rorschach, Ozymandias, Dr. Manhattan, Silk Spectre, Nite Owl, and the Comedian! When the Comedian dies, a series of events are set into motion that bring the world ever closer to a deadly threat no one saw coming.",
+    "desc_is_solicitation": false,
+    "image": "https://static.metron.cloud/media/issue/2019/08/19/watchmen-1.jpg",
+    "cover_hash": "857287ac17c91e75",
+    "average_rating": 5.0,
+    "rating_count": 1,
+    "arcs": [],
+    "credits": [
+        {
+            "id": 63,
+            "creator": "Alan Moore",
+            "role": [
+                {
+                    "id": 1,
+                    "name": "Writer"
+                }
+            ]
+        },
+        {
+            "id": 286,
+            "creator": "Dave Gibbons",
+            "role": [
+                {
+                    "id": 33,
+                    "name": "Illustrator"
+                },
+                {
+                    "id": 6,
+                    "name": "Letterer"
+                },
+                {
+                    "id": 7,
+                    "name": "Cover"
+                }
+            ]
+        },
+        {
+            "id": 2591,
+            "creator": "John Higgins",
+            "role": [
+                {
+                    "id": 5,
+                    "name": "Colorist"
+                }
+            ]
+        },
+        {
+            "id": 81,
+            "creator": "Len Wein",
+            "role": [
+                {
+                    "id": 8,
+                    "name": "Editor"
+                }
+            ]
+        }
+    ],
+    "characters": [
+        {
+            "id": 258,
+            "name": "Comedian",
+            "modified": "2026-09-25T09:03:20.592227-04:00"
+        },
+        {
+            "id": 183,
+            "name": "Doctor Manhattan",
+            "modified": "2026-09-25T09:03:20.592227-04:00"
+        },
+        {
+            "id": 2380,
+            "name": "Nite Owl (Dreiberg)",
+            "modified": "2026-09-25T09:03:20.592227-04:00"
+        },
+        {
+            "id": 2382,
+            "name": "Nite Owl (Mason)",
+            "modified": "2026-09-25T09:03:20.592227-04:00"
+        },
+        {
+            "id": 189,
+            "name": "Ozymandias",
+            "modified": "2026-09-25T09:03:20.592227-04:00"
+        },
+        {
+            "id": 2379,
+            "name": "Rorschach (Kovacs)",
+            "modified": "2026-09-25T09:03:20.592227-04:00"
+        },
+        {
+            "id": 2381,
+            "name": "Silk Spectre",
+            "modified": "2026-09-25T09:03:20.592227-04:00"
+        }
+    ],
+    "teams": [],
+    "universes": [],
+    "reprints": [
+        {
+            "id": 185106,
+            "issue": "DC W.I.P.: Watchmen (2026) #1"
+        },
+        {
+            "id": 158876,
+            "issue": "Watchmen: DC Compact Comics Edition TPB (2024) #1"
+        }
+    ],
+    "variants": [],
+    "cv_id": 27158,
+    "gcd_id": 41815,
+    "resource_url": "https://metron.cloud/issue/watchmen-1986-1/",
+    "modified": "2026-09-25T09:02:58.446564-04:00",
+    "attribution": [
+        {
+            "source": "Grand Comics Database",
+            "url": "https://www.comics.org/issue/41815/"
+        }
+    ]
+}

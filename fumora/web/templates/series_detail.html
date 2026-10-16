@@ -1,8 +1,29 @@
 {% extends "base.html" %}
 {% block title %}{{ s.name }} · Fumora{% endblock %}
 {% block content %}
+{% if running %}<meta http-equiv="refresh" content="4">{% endif %}
 <p><a href="/series">← Series</a></p>
 <h1>{{ s.name }}{% if s.year_began %} ({{ s.year_began }}){% endif %}</h1>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+{% if s.match_status == "matched" and not s.confirmed_by %}
+<section class="card attention">
+  <h2>Confirm this match</h2>
+  <table class="compare">
+    <tr><th></th><th>Mylar</th><th>Metron</th></tr>
+    <tr><th>Name</th><td>{{ s.mylar_name or "—" }}</td><td>{{ s.name }}</td></tr>
+    <tr><th>Start year</th><td>{{ s.mylar_year or "—" }}</td><td>{{ s.year_began or "—" }}</td></tr>
+    <tr><th>Folder</th><td colspan="2"><code>{{ s.path or "—" }}</code></td></tr>
+  </table>
+  {% if s.match_note %}<p class="muted">{{ s.match_note }}</p>{% endif %}
+  <div class="row">
+    <form method="post" action="/series/{{ s.id }}/confirm"><button>Confirm match</button></form>
+    <form method="post" action="/series/{{ s.id }}/not-on-metron"><button class="secondary">Not on Metron</button></form>
+    <span class="muted">Or pick another series below. Fumora won't write this series' files until the match is confirmed.</span>
+  </div>
+</section>
+{% endif %}
+
 <dl class="facts">
   <dt>Type</dt><dd>{{ s.series_type or s.mylar_type or "—" }}</dd>
   <dt>Publisher</dt><dd>{{ s.publisher.name if s.publisher else "—" }}</dd>
@@ -10,21 +31,64 @@
   <dt>Metron</dt><dd>
     <span class="badge {{ s.match_status }}">{{ match_labels[s.match_status] }}</span>
     {% if s.metron_id %}<a href="https://metron.cloud/series/{{ s.metron_id }}/" target="_blank" rel="noopener">#{{ s.metron_id }}</a>{% endif %}
-    {% if s.match_note %}<small class="muted">{{ s.match_note }}</small>{% endif %}
+    {% if s.confirmed_by %}<small class="muted">confirmed ({{ "automatically" if s.confirmed_by == "auto" else "by you" }})</small>{% endif %}
+    {% if s.match_note and s.confirmed_by %}<small class="muted">{{ s.match_note }}</small>{% endif %}
     {% if s.suggested_metron_id and s.match_status == "review" %}
     <form method="post" action="/series/{{ s.id }}/accept-suggestion" class="row">
       <span>Suggested: <a href="https://metron.cloud/series/{{ s.suggested_metron_id }}/" target="_blank" rel="noopener">Metron #{{ s.suggested_metron_id }}</a></span>
       <button class="small">Accept suggestion</button>
     </form>
-    {% endif %}
+    {% elif s.match_note and not s.confirmed_by and s.match_status != "matched" %}<small class="muted">{{ s.match_note }}</small>{% endif %}
   </dd>
   <dt>ComicVine</dt><dd>{% if s.cv_id %}<a href="https://comicvine.gamespot.com/volume/4050-{{ s.cv_id }}/" target="_blank" rel="noopener">{{ s.cv_id }}</a>{% else %}—{% endif %}</dd>
-  {% if s.age_rating_override %}<dt>Age rating</dt><dd>{{ s.age_rating_override }} (set by hand)</dd>{% endif %}
+  {% if s.mylar_name and s.mylar_name != s.name %}<dt>Name in Mylar</dt><dd>{{ s.mylar_name }}{% if s.mylar_year %} ({{ s.mylar_year }}){% endif %}</dd>{% endif %}
 </dl>
 
-<details class="card" {% if s.match_status != "matched" or error %}open{% endif %}>
+<form class="card" method="post" action="/series/{{ s.id }}/edit">
+  <h2>Age rating and tags</h2>
+  <label>Age rating
+    <select name="age_rating">
+      <option value="">Calculated from issues ({{ calculated_rating or "none known" }})</option>
+      {% for r in ratings %}<option value="{{ r }}" {% if s.age_rating_override == r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+    </select>
+    <small>Written to every file of this series unless an issue has its own. Now: <strong>{{ effective_rating or "none" }}</strong>.</small>
+  </label>
+  <label>Tags
+    <input name="tags" value="{{ tag_names }}" placeholder="e.g. Explicit">
+    <small>Comma-separated. Added to each file's ComicInfo &lt;Tags&gt; (tags already in a file are kept).</small>
+  </label>
+  <button>Save</button>
+</form>
+
+<section class="card">
+  <h2>Files</h2>
+  <div class="row">
+    <form method="post" action="/series/{{ s.id }}/scan"><button class="secondary" {% if running %}disabled{% endif %}>Scan folder</button></form>
+    <form method="post" action="/series/{{ s.id }}/retag"><button class="secondary" {% if running %}disabled{% endif %}>Preview tags</button></form>
+    <form method="post" action="/series/{{ s.id }}/retag"><input type="hidden" name="write" value="true"><button {% if running or not writable %}disabled{% endif %}>Write tags</button></form>
+    <a class="button secondary" href="/series/{{ s.id }}?rename=1">Preview rename</a>
+  </div>
+  {% for kind, j in jobs.items() %}{% if j %}
+  <p class="muted small">{{ kind|capitalize }}: {{ j.state }}{% if j.state in ("queued", "running") and j.total %} · {{ j.progress }}/{{ j.total }}{% endif %}{% if j.message %} · {{ j.message }}{% endif %}</p>
+  {% endif %}{% endfor %}
+
+  {% if plan is not none %}
+  <h3>Rename preview</h3>
+  {% if plan.folder %}<p>Folder: <code>{{ plan.folder.old.rsplit('/',1)[-1] }}</code> → <code>{{ plan.folder.new.rsplit('/',1)[-1] }}</code></p>{% endif %}
+  {% if plan.files %}
+  <table class="log"><thead><tr><th>Now</th><th>After</th></tr></thead><tbody>
+  {% for r in plan.files %}<tr><td><code class="path">{{ r.old.rsplit('/',1)[-1] }}</code></td><td><code class="path">{{ r.new.rsplit('/',1)[-1] }}</code></td></tr>{% endfor %}
+  </tbody></table>
+  {% endif %}
+  {% for m in plan.skipped %}<p class="muted">{{ m }}</p>{% endfor %}
+  {% if plan.folder or plan.files %}
+  <form method="post" action="/series/{{ s.id }}/organize"><button {% if running or not writable %}disabled{% endif %}>Rename {{ plan.files|length }} files{% if plan.folder %} and the folder{% endif %}</button></form>
+  {% else %}<p class="muted">Every file already matches the naming template.</p>{% endif %}
+  {% endif %}
+</section>
+
+<details class="card" {% if s.match_status not in ("matched",) or error %}open{% endif %}>
   <summary>Match to a different Metron series</summary>
-  {% if error %}<p class="error">{{ error }}</p>{% endif %}
   <p class="muted">Find the series on <a href="https://metron.cloud/series/?name={{ s.name|urlencode }}" target="_blank" rel="noopener">metron.cloud</a> and paste its id (the number in its URL).</p>
   <form class="row" method="post" action="/series/{{ s.id }}/metron">
     <input name="metron_id" inputmode="numeric" pattern="[0-9]+" required placeholder="Metron series id" aria-label="Metron series id">
@@ -35,15 +99,22 @@
 <h2>Issues ({{ issues|length }})</h2>
 <div class="scroll">
 <table class="log">
-  <thead><tr><th>#</th><th>Cover date</th><th>Status</th><th>Metron</th><th>File</th></tr></thead>
+  <thead><tr><th>#</th><th>Cover date</th><th>Status</th><th>Rating</th><th>Metron</th><th>File</th><th>Tags</th></tr></thead>
   <tbody>
   {% for i in issues %}
   <tr>
     <td>{{ i.number }}</td>
     <td>{{ i.cover_date or "" }}</td>
     <td>{{ i.status }}</td>
+    <td>{{ i.rating if i.rating and i.rating != "Unknown" else "" }}</td>
     <td>{% if i.metron_id %}<a href="https://metron.cloud/issue/{{ i.metron_id }}/" target="_blank" rel="noopener">{{ "new" if i.match_status == "new" else "✓" }}</a>{% elif i.match_status == "unmatched" %}<span class="error">unmatched</span>{% endif %}</td>
     <td>{% for f in i.files %}<code class="path">{{ f.path.rsplit('/', 1)[-1] }}</code>{% endfor %}</td>
+    <td>{% for f in i.files %}{% set p = f.tag_preview %}{% if p %}
+      {% if p.error %}<span class="error small">{{ p.error }}</span>
+      {% elif p.fields %}<details><summary class="small">{{ "would change" if p.dry_run else "changed" }} {{ p.fields|length }}</summary>
+        <table class="diff">{% for k, v in p.fields.items() %}<tr><th>{{ k }}</th><td class="old">{{ v[0] or "—" }}</td><td>{{ v[1] }}</td></tr>{% endfor %}</table></details>
+      {% else %}<span class="muted small">{{ "up to date" if p.dry_run else "written" }}</span>{% endif %}
+    {% elif f.tagged_at %}<span class="muted small">tagged {{ f.tagged_at.strftime('%Y-%m-%d') }}</span>{% endif %}{% endfor %}</td>
   </tr>
   {% endfor %}
   </tbody>

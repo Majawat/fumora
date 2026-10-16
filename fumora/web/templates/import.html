@@ -5,6 +5,32 @@
 <p class="muted">Reads a copy of Mylar's database at <code>{{ mylar_path }}</code> and matches every series to Metron. Nothing in Mylar or your library is changed. Safe to run again: it continues where it left off.</p>
 <div id="import-status">{% include "_import_status.html" %}</div>
 
+{% if unconfirmed %}
+<h2>Matches to confirm ({{ unconfirmed|length }})</h2>
+<p class="muted">Metron's name or year differs from Mylar's, so these weren't confirmed automatically. Fumora won't write their files until confirmed.</p>
+<div class="scroll">
+<table class="log">
+  <thead><tr><th>Mylar</th><th>Metron</th><th></th></tr></thead>
+  <tbody>
+  {% for s in unconfirmed %}
+  <tr>
+    <td>{{ s.mylar_name or "—" }}{% if s.mylar_year %} ({{ s.mylar_year }}){% endif %}</td>
+    <td><a href="/series/{{ s.id }}">{{ s.name }}{% if s.year_began %} ({{ s.year_began }}){% endif %}</a></td>
+    <td><form method="post" action="/series/{{ s.id }}/confirm" class="inline-form"><button class="secondary small">Confirm</button></form></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<form method="post" action="/import/confirm-all" class="row"><button class="secondary">Confirm all {{ unconfirmed|length }}</button><span class="muted">Only after checking them.</span></form>
+{% endif %}
+
+<h2>Library folders</h2>
+<form method="post" action="/library/scan" class="row">
+  <button class="secondary">Scan all series folders</button>
+  <span class="muted">Links files on disk that Mylar never recorded.{% if scan_job %} Last scan: {{ scan_job.state }}{% if scan_job.message %} · {{ scan_job.message }}{% endif %}{% endif %}</span>
+</form>
+
 {% if review %}
 <h2>Needs attention ({{ review|length }})</h2>
 {% if report.series_suggested %}
