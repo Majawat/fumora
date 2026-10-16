@@ -127,6 +127,7 @@ def naming_settings(db) -> dict:
         "file_template": settings_store.get(db, "naming.file_template") or naming.DEFAULT_FILE,
         "collected_template": settings_store.get(db, "naming.collected_template") or None,
         "colon": settings_store.get(db, "naming.colon") or "delete",
+        "apostrophes": settings_store.get(db, "naming.apostrophes") or "remove",
     }
 
 

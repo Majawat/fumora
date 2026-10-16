@@ -82,6 +82,8 @@ def test_render_tokens_and_colons(app, tmp_path):
         assert naming.render("{Series TitleThe}", ctx, colon="dash") == "Umbrella Academy- Dallas, The"
         assert naming.render("{Series Title} #{Issue:000}", ctx) == "The Umbrella Academy Dallas #001.5"
         assert naming.render("{Publisher}/{Issue Title}", ctx) == "Dark Horse"  # "/" removed, empty title
+        assert naming.render("Maus: A Survivor's Tale", ctx) == "Maus A Survivors Tale"  # Mylar style
+        assert naming.render("Survivor's", ctx, apostrophes="keep") == "Survivor's"
         assert naming.render("{Series Title} ({Issue Year})", ctx) == "The Umbrella Academy Dallas (2008)"
 
 
@@ -161,3 +163,19 @@ def test_unlinked_file_is_linked_by_a_later_scan(app, tmp_path):
         db.flush()
         assert scan_folders(db).linked == 1
         assert len(db.scalars(__import__("sqlalchemy").select(File)).all()) == 1
+
+
+def test_folder_only_move_lists_no_file_renames(app, tmp_path):
+    folder = tmp_path / "Black Hole (1995)"
+    folder.mkdir()
+    (folder / "Black Hole 001 (1995).cbz").write_bytes(b"x")
+    with app.state.session_factory() as db:
+        s = _series(db, folder, name="Black Hole", year=1998)
+        i = Issue(series=s, number="1", cover_date=date(1995, 1, 1), locked_fields=[])
+        i.files = [File(path=str(folder / "Black Hole 001 (1995).cbz"))]
+        db.add(i)
+        db.flush()
+        plan = naming.plan_series(s)
+        assert plan.folder.new.endswith("Black Hole (1998)") and plan.files == []
+        assert naming.apply_plan(db, s, plan) == (1, [])
+        assert os.path.exists(i.files[0].path) and "(1998)/Black Hole 001 (1995).cbz" in i.files[0].path

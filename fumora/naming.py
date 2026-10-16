@@ -52,9 +52,12 @@ def _title_the(title: str) -> str:
     return f"{m.group(2)}, {m.group(1)}" if m else title
 
 
-def clean(name: str, colon: str = "delete") -> str:
-    """Make a single path component safe on Windows/SMB."""
+def clean(name: str, colon: str = "delete", apostrophes: str = "remove") -> str:
+    """Make a single path component safe on Windows/SMB. Mylar removes
+    apostrophes ("Survivor's" -> "Survivors"); that is the default here too."""
     name = name.replace(":", COLON_MODES.get(colon, ""))
+    if apostrophes == "remove":
+        name = re.sub(r"['’]", "", name)
     name = _ILLEGAL.sub("", name)
     name = re.sub(r"\s+", " ", name).strip().rstrip(".")
     return name or "_"
@@ -84,7 +87,7 @@ def context(series: Series, issue: Issue | None = None) -> dict[str, str]:
     return ctx
 
 
-def render(template: str, ctx: dict[str, str], colon: str = "delete") -> str:
+def render(template: str, ctx: dict[str, str], colon: str = "delete", apostrophes: str = "remove") -> str:
     def sub(m: re.Match) -> str:
         name, spec = m.group(1), m.group(2)
         value = ctx.get(name, "")
@@ -92,7 +95,7 @@ def render(template: str, ctx: dict[str, str], colon: str = "delete") -> str:
 
     text = _TOKEN.sub(sub, template)
     text = re.sub(r"\(\s*\)|\[\s*\]", "", text)  # empty "()" from a missing year
-    return clean(text, colon)
+    return clean(text, colon, apostrophes)
 
 
 @dataclass
@@ -116,6 +119,7 @@ def plan_series(
     file_template: str = DEFAULT_FILE,
     collected_template: str | None = None,
     colon: str = "delete",
+    apostrophes: str = "remove",
     shared_folder: bool = False,
 ) -> OrganizePlan:
     """What would change for one series. The folder is only renamed when no
@@ -124,7 +128,7 @@ def plan_series(
     if not series.path:
         return OrganizePlan(None, [], ["Series has no folder"])
     parent = os.path.dirname(series.path.rstrip("/"))
-    target_folder = os.path.join(parent, render(folder_template, context(series), colon))
+    target_folder = os.path.join(parent, render(folder_template, context(series), colon, apostrophes))
     folder = None
     if target_folder != series.path and not shared_folder:
         folder = Rename(None, None, series.path, target_folder)
@@ -140,16 +144,15 @@ def plan_series(
     for issue in series.issues:
         for f in issue.files:
             ext = os.path.splitext(f.path)[1].lower()
-            new_name = render(template, context(series, issue), colon) + ext
+            new_name = render(template, context(series, issue), colon, apostrophes) + ext
             new = os.path.join(final_folder, new_name)
-            old_final = os.path.join(final_folder, os.path.basename(f.path))
             if new in taken:
                 skipped.append(f"Two files would be named {new_name}")
                 continue
             taken.add(new)
-            if new != old_final or folder:
+            # A file that only moves with its folder is handled by the folder rename.
+            if new_name != os.path.basename(f.path):
                 files.append(Rename(issue.id, f.id, f.path, new))
-    files = [r for r in files if r.new != r.old]
     return OrganizePlan(folder, files, skipped)
 
 
@@ -193,7 +196,7 @@ def apply_plan(db, series: Series, plan: OrganizePlan) -> tuple[int, list[str]]:
             problems.append(f"Not renamed, target exists: {os.path.basename(r.new)}")
             continue
         try:
-            os.rename(f.path, r.new)
+            os.rename(f.path, r.new)  # f.path already follows a folder rename
         except OSError as exc:
             problems.append(f"Not renamed: {os.path.basename(f.path)}: {exc}")
             continue
