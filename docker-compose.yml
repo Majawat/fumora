@@ -15,4 +15,6 @@ services:
       # mounted at the same path the download clients use, so imports are
       # hardlinks (torrents keep seeding) or instant moves (usenet).
       # - /mnt/user/data:/data
+      # Optional, for the one-time Mylar import (read-only):
+      # - /mnt/user/appdata/mylar3:/mylar:ro
     restart: unless-stopped

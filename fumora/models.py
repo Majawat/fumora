@@ -106,6 +106,19 @@ class Series(Base):
     locked_fields: Mapped[list] = mapped_column(JSON, default=list)
     last_synced: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     added: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # Metron matching: pending, matched, review, not_found, accepted (suggestion accepted,
+    # waiting for the import job to apply it)
+    match_status: Mapped[str] = mapped_column(
+        String(20), default="pending", server_default="pending", index=True
+    )
+    match_note: Mapped[str | None] = mapped_column(String(500))
+    # Mylar's own book type (Print, TPB, GN, HC, One-Shot, Digital), kept as a matching hint.
+    mylar_type: Mapped[str | None] = mapped_column(String(20))
+    # A Metron series found by name and year when the ComicVine id found nothing;
+    # it is only used once the user accepts it.
+    suggested_metron_id: Mapped[int | None]
+    # When our issues were last paired with Metron's issue list.
+    issues_synced: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     publisher: Mapped[Publisher | None] = relationship()
     imprint: Mapped[Imprint | None] = relationship()
@@ -145,6 +158,8 @@ class Issue(Base):
     rating_override: Mapped[str | None] = mapped_column(String(30))
     locked_fields: Mapped[list] = mapped_column(JSON, default=list)
     last_synced: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Metron matching: matched, unmatched (ours only), new (Metron only, added by a sync)
+    match_status: Mapped[str | None] = mapped_column(String(20))
 
     series: Mapped[Series] = relationship(back_populates="issues")
     files: Mapped[list["File"]] = relationship(back_populates="issue")
@@ -203,6 +218,25 @@ class Event(Base):
     message: Mapped[str] = mapped_column(Text)
     series_id: Mapped[int | None] = mapped_column(ForeignKey("series.id", ondelete="SET NULL"))
     issue_id: Mapped[int | None] = mapped_column(ForeignKey("issue.id", ondelete="SET NULL"))
+
+
+class Job(Base):
+    """A background job (import, refresh, ...). Survives restarts."""
+
+    __tablename__ = "job"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(50), index=True)
+    # queued, running, done, failed
+    state: Mapped[str] = mapped_column(String(20), default="queued", index=True)
+    phase: Mapped[str | None] = mapped_column(String(50))
+    progress: Mapped[int] = mapped_column(default=0)
+    total: Mapped[int] = mapped_column(default=0)
+    message: Mapped[str | None] = mapped_column(Text)
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Setting(Base):

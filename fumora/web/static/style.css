@@ -39,3 +39,21 @@ table.log { width: 100%; border-collapse: collapse; }
 table.log th, table.log td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
 table.log td:first-child { white-space: nowrap; color: var(--muted); }
 tr.error td { color: var(--err); }
+.filters input, .filters select { width: auto; flex: 1 1 200px; margin: 0; }
+select { font: inherit; padding: .5rem; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+.scroll { overflow-x: auto; }
+.badge { display: inline-block; padding: 0 .45rem; border-radius: 999px; font-size: .8rem; border: 1px solid var(--line); white-space: nowrap; }
+.badge.matched { color: var(--ok); border-color: var(--ok); }
+.badge.review, .badge.not_found { color: var(--err); border-color: var(--err); }
+.badge.pending { color: var(--muted); }
+dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; }
+dl.facts dt { color: var(--muted); }
+dl.facts dd { margin: 0; overflow-wrap: anywhere; }
+details.card summary { cursor: pointer; font-weight: 600; }
+details.card .row input { width: auto; flex: 1 1 180px; margin: 0; }
+progress { width: 100%; height: .6rem; accent-color: var(--accent); }
+code.path { font-size: .8rem; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .topbar { flex-wrap: wrap; gap: .5rem 1rem; } }
+button.small { padding: .2rem .6rem; font-size: .85rem; }
+.inline-form { display: inline; }
+.badge.accepted { color: var(--accent); border-color: var(--accent); }

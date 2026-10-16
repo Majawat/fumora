@@ -13,8 +13,12 @@ from . import __version__, settings_store
 from .auth import hash_password, load_or_create_secret, verify_password
 from .config import Config, load_config
 from .db import make_engine, make_session_factory, upgrade_db
+from .import_job import KIND as MYLAR_IMPORT
+from .import_job import make_handler as make_import_handler
+from .jobs import JobRunner
 from .metron import MetronAuthError, MetronClient, MetronError, RateLimiter
 from .models import Event, Issue, Series, User
+from .web.library import register_library_routes
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 PUBLIC_PATHS = ("/static/", "/login", "/setup", "/api/health")
@@ -27,16 +31,28 @@ def create_app(config: Config | None = None) -> FastAPI:
     engine = make_engine(config.db_url)
     SessionLocal = make_session_factory(engine)
 
+    # One limiter for the whole process: all Metron calls share its budget.
+    metron_limiter = RateLimiter()
+
+    def make_metron_client(username: str, password: str) -> MetronClient:
+        return MetronClient(username, password, metron_limiter)
+
+    jobs = JobRunner(SessionLocal)
+    jobs.register(MYLAR_IMPORT, make_import_handler(config.config_dir, make_metron_client))
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        jobs.resume_all()
         yield
+        await jobs.shutdown()
         engine.dispose()
 
     app = FastAPI(title="Fumora", version=__version__, lifespan=lifespan)
     app.state.config = config
     app.state.session_factory = SessionLocal
-    # One limiter for the whole process: all Metron calls share its budget.
-    app.state.metron_limiter = RateLimiter()
+    app.state.metron_limiter = metron_limiter
+    app.state.make_metron_client = make_metron_client
+    app.state.jobs = jobs
 
     templates = Jinja2Templates(directory=WEB_DIR / "templates")
     templates.env.globals["version"] = __version__
@@ -202,6 +218,8 @@ def create_app(config: Config | None = None) -> FastAPI:
             except Exception as exc:  # network errors
                 ok, message = False, f"Could not reach Metron: {type(exc).__name__}"
         return templates.TemplateResponse(request, "_test_result.html", {"ok": ok, "message": message})
+
+    register_library_routes(app, templates, get_db)
 
     @app.get("/api/health")
     def health():

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Series · Fumora{% endblock %}
+{% block content %}
+<h1>Series</h1>
+<form class="row filters" method="get" action="/series">
+  <input name="q" value="{{ q }}" placeholder="Filter by name" aria-label="Filter by name">
+  <select name="match" aria-label="Match status">
+    <option value="">All</option>
+    {% for key, label in match_labels.items() %}
+    <option value="{{ key }}" {% if match == key %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <button class="secondary">Filter</button>
+</form>
+<p class="muted">{{ rows|length }} series</p>
+<div class="scroll">
+<table class="log">
+  <thead><tr><th>Series</th><th>Type</th><th>Have</th><th>Metron</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  {% set s = r.series %}
+  <tr>
+    <td><a href="/series/{{ s.id }}">{{ s.name }}{% if s.year_began %} ({{ s.year_began }}){% endif %}</a></td>
+    <td>{{ s.series_type or s.mylar_type or "" }}</td>
+    <td>{{ r.have }}/{{ r.total }}</td>
+    <td><span class="badge {{ s.match_status }}">{{ match_labels[s.match_status] }}</span>
+      {% if r.unmatched %}<small class="muted">{{ r.unmatched }} unmatched</small>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

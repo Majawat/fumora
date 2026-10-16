@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Mylar import · Fumora{% endblock %}
+{% block content %}
+<h1>Mylar import</h1>
+<p class="muted">Reads a copy of Mylar's database at <code>{{ mylar_path }}</code> and matches every series to Metron. Nothing in Mylar or your library is changed. Safe to run again: it continues where it left off.</p>
+<div id="import-status">{% include "_import_status.html" %}</div>
+
+{% if review %}
+<h2>Needs attention ({{ review|length }})</h2>
+{% if report.series_suggested %}
+<form method="post" action="/import/accept-suggestions" class="row">
+  <button>Accept all {{ report.series_suggested }} suggestions</button>
+  <span class="muted">Suggestions are Metron series with the same name and start year. Check a few first.</span>
+</form>
+{% endif %}
+<div class="scroll">
+<table class="log">
+  <thead><tr><th>Series</th><th>Status</th><th>Why</th><th>Suggestion</th></tr></thead>
+  <tbody>
+  {% for r in review %}{% set s = r.series %}
+  <tr>
+    <td><a href="/series/{{ s.id }}">{{ s.name }}{% if s.year_began %} ({{ s.year_began }}){% endif %}</a></td>
+    <td><span class="badge {{ s.match_status }}">{{ match_labels[s.match_status] }}</span></td>
+    <td class="muted">{{ s.match_note or "" }}</td>
+    <td>{% if s.suggested_metron_id %}<a href="https://metron.cloud/series/{{ s.suggested_metron_id }}/" target="_blank" rel="noopener">Metron #{{ s.suggested_metron_id }}</a>
+      {% if s.match_status == "review" %}<form method="post" action="/series/{{ s.id }}/accept-suggestion" class="inline-form"><button class="secondary small">Accept</button></form>{% endif %}{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+{% if with_unmatched %}
+<h2>Matched series with unmatched issues ({{ with_unmatched|length }})</h2>
+<p class="muted">Issues Mylar has that Metron doesn't list under the same number.</p>
+<table class="log">
+  <thead><tr><th>Series</th><th>Unmatched</th></tr></thead>
+  <tbody>
+  {% for r in with_unmatched %}{% set s = r.series %}
+  <tr><td><a href="/series/{{ s.id }}">{{ s.name }}{% if s.year_began %} ({{ s.year_began }}){% endif %}</a></td><td>{{ r.unmatched }} of {{ r.total }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}
