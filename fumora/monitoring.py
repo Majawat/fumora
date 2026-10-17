@@ -21,9 +21,9 @@ from .numbers import sort_number
 OPTIONS = {
     "all": "All issues",
     "future": "Future issues only",
-    "missing": "Missing and future issues",
-    "existing": "Issues I have, and future ones",
-    "gaps": "Fill gaps: missing issues between the first and last I have, and future ones",
+    "missing": "Missing + future",
+    "existing": "Ones I have + future",
+    "gaps": "Fill gaps + future",
     "none": "None",
 }
 

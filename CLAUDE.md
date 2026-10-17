@@ -28,3 +28,6 @@ docker compose up --build
 - Tests stay offline (respx mocks). `tests/test_migrations.py` fails if models and migrations drift.
 - Files get ComicInfo.xml 2.1 + MetronInfo.xml 1.1, merged — never drop fields we don't own (e.g. `<Tags>`).
 - No integration with Komga or BookOrbit; they folder-watch.
+- Monitoring: `Issue.monitored` is the only stored choice; Wanted/Missing/Unreleased/Downloaded are derived (`monitoring.py`). `Issue.status` is Mylar's legacy value, display only.
+- Metron budget: never page Metron's `modified_gt` change feed (can be 60k+ issues/day). Daily refresh = release schedule + rolling batch (`refresh.py`).
+- Test instance (`fumora-test`, copies in `/data/media/comics-test`) is disposable. Production comic files are never written, renamed or converted without the owner's explicit OK.

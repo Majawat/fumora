@@ -16,7 +16,7 @@
     <select name="option">
       {% for key, label in monitor_options.items() %}<option value="{{ key }}" {% if key == "future" %}selected{% endif %}>{{ label }}</option>{% endfor %}
     </select>
-    <small>Wanted = monitored, released, and no file. If the folder already exists, its files are linked first, so "Missing" and "Fill gaps" know what you have.</small>
+    <small>Wanted = monitored, released, and no file. "Fill gaps" monitors missing issues between the first and last you have. If the folder already exists, its files are linked first, so "Missing" and "Fill gaps" know what you have.</small>
   </label>
   <label class="inline"><input type="checkbox" name="monitor_new" value="true" checked> Monitor new issues as Metron adds them</label>
   <p><button>Add series</button></p>

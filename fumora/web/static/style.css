@@ -85,3 +85,5 @@ nav.tabs a.active { color: var(--fg); border-bottom: 2px solid var(--accent); fo
 ul.plain { list-style: none; padding: 0; margin: 0 0 1rem; }
 ul.plain li { padding: .15rem 0; border-bottom: 1px solid var(--line); }
 a.button.small { padding: .2rem .6rem; font-size: .85rem; background: var(--accent); color: var(--accent-fg); }
+select { max-width: 100%; }
+form.row + form.row { margin-top: .5rem; }
