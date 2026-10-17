@@ -103,7 +103,7 @@
   <tbody>
   {% for i in issues %}
   <tr>
-    <td>{{ i.number }}</td>
+    <td><a href="/issues/{{ i.id }}">{{ i.number }}</a></td>
     <td>{{ i.cover_date or "" }}</td>
     <td>{{ i.status }}</td>
     <td>{{ i.rating if i.rating and i.rating != "Unknown" else "" }}</td>

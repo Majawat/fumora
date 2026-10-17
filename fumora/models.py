@@ -245,7 +245,7 @@ class Job(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     kind: Mapped[str] = mapped_column(String(50), index=True)
-    # queued, running, done, failed
+    # queued, running, done, failed, cancelled
     state: Mapped[str] = mapped_column(String(20), default="queued", index=True)
     phase: Mapped[str | None] = mapped_column(String(50))
     progress: Mapped[int] = mapped_column(default=0)

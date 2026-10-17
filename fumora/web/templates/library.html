@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Library · Fumora{% endblock %}
+{% block content %}
+<h1>Library</h1>
+<section class="stats">
+  <div class="stat"><span>{{ stats.series }}</span>Series</div>
+  <div class="stat"><span>{{ stats.unconfirmed }}</span>Matches to confirm</div>
+  <div class="stat"><span>{{ stats.files_writable }}/{{ stats.files }}</span>Files Fumora may write</div>
+  <div class="stat"><span>{{ stats.files_tagged }}</span>Files tagged by Fumora</div>
+  <div class="stat"><span>{{ stats.files_unlinked }}</span>Files not linked to an issue</div>
+</section>
+
+<section class="card">
+  <h2>Tags for the whole library</h2>
+  <p class="muted">Covers every series whose Metron match is confirmed (or that isn't on Metron). Unconfirmed matches are skipped and cost no Metron requests. The first run fetches Metron's record for each issue (5,000 a day); the job waits out the daily limit by itself.</p>
+  {% if preview.would_change or preview.up_to_date or preview.errors %}
+  <p><strong>Latest results:</strong> {{ preview.would_change }} files would change, {{ preview.up_to_date }} up to date, {{ preview.errors }} can't be tagged.</p>
+  {% if preview.fields %}<p class="muted small">Most-changed fields: {% for k, n in preview.fields.items() %}{% if loop.index <= 10 %}{{ k }} ({{ n }}){% if not loop.last and loop.index < 10 %}, {% endif %}{% endif %}{% endfor %}</p>{% endif %}
+  {% endif %}
+  {% set busy = running.retag %}
+  <div class="row">
+    <form method="post" action="/library/retag"><button class="secondary" {% if busy %}disabled{% endif %}>Preview tags</button></form>
+    <form method="post" action="/library/retag" class="row">
+      <input type="hidden" name="write" value="true">
+      <label class="inline"><input type="checkbox" name="checked" value="true" required> I've looked at the preview</label>
+      <button {% if busy %}disabled{% endif %}>Write tags</button>
+    </form>
+    {% if busy %}<a href="/jobs">A tag job is running →</a>{% endif %}
+  </div>
+</section>
+
+<section class="card">
+  <h2>Folders</h2>
+  <form method="post" action="/library/scan" class="row">
+    <button class="secondary" {% if running.scan %}disabled{% endif %}>Scan all series folders</button>
+    <span class="muted">Links files on disk that aren't linked to an issue yet.</span>
+  </form>
+</section>
+
+<h2>Files without full Metron tags ({{ untagged|length }} series)</h2>
+<p class="muted">Issues with a file but no Metron match: they get basic tags only (series, number, rating). Fix by matching the series, or adding the issues to Metron.</p>
+{% if untagged %}
+<div class="scroll">
+<table class="log">
+  <thead><tr><th>Series</th><th>Issues</th></tr></thead>
+  <tbody>
+  {% for r in untagged %}{% set s = r.series %}
+  <tr>
+    <td><a href="/series/{{ s.id }}">{{ s.name }}{% if s.year_began %} ({{ s.year_began }}){% endif %}</a>
+      <small class="muted why">{% if s.match_status == "matched" %}Issues not on this Metron series{% else %}{{ match_labels[s.match_status] }}{% endif %}</small></td>
+    <td>{{ r.issues }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endblock %}

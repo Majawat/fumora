@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}{{ s.name }} #{{ i.number }} · Fumora{% endblock %}
+{% block content %}
+<p><a href="/series/{{ s.id }}">← {{ s.name }}</a></p>
+<h1>{{ s.name }} #{{ i.number }}</h1>
+<dl class="facts">
+  <dt>Cover date</dt><dd>{{ i.cover_date or "—" }}</dd>
+  <dt>Status</dt><dd>{{ i.status }}</dd>
+  <dt>Metron</dt><dd>{% if i.metron_id %}<a href="https://metron.cloud/issue/{{ i.metron_id }}/" target="_blank" rel="noopener">#{{ i.metron_id }}</a>{% else %}not matched{% endif %}</dd>
+  <dt>Metron rating</dt><dd>{{ i.rating or "—" }}</dd>
+  <dt>Files</dt><dd>{% for f in i.files %}<code class="path">{{ f.path }}</code><br>{% else %}—{% endfor %}</dd>
+</dl>
+<form class="card" method="post" action="/issues/{{ i.id }}/edit">
+  <h2>Age rating and tags for this issue</h2>
+  <label>Age rating
+    <select name="age_rating">
+      <option value="">Same as the series</option>
+      {% for r in ratings %}<option value="{{ r }}" {% if i.rating_override == r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+    </select>
+    <small>Written to this issue's file: <strong>{{ effective or "none" }}</strong>.</small>
+  </label>
+  <label>Tags
+    <input name="tags" value="{{ tag_names }}" placeholder="e.g. Explicit">
+    <small>Added to the series' tags{% if series_tags %} ({{ series_tags }}){% endif %}.</small>
+  </label>
+  <button>Save</button>
+</form>
+{% endblock %}

@@ -42,6 +42,7 @@ class JobRunner:
         self.session_factory = session_factory
         self.handlers: dict[str, Handler] = {}
         self._tasks: dict[int, asyncio.Task] = {}
+        self._cancel_requested: set[int] = set()
 
     def register(self, kind: str, handler: Handler) -> None:
         self.handlers[kind] = handler
@@ -78,6 +79,25 @@ class JobRunner:
         for job_id, kind in pending:
             self._spawn(job_id, kind)
 
+    def cancel(self, job_id: int) -> bool:
+        """Stop a running job. Its work so far is kept; it won't resume on restart."""
+        task = self._tasks.get(job_id)
+        with self.session_factory() as db:
+            job = db.get(Job, job_id)
+            if job is None or job.state not in ("queued", "running"):
+                return False
+            if task is None:  # queued/running in the DB but not in this process
+                job.state, job.finished, job.message = "cancelled", datetime.now(UTC), "Cancelled"
+                db.commit()
+                return True
+        self._cancel_requested.add(job_id)
+        task.cancel()
+        return True
+
+    def recent(self, limit: int = 30) -> list[Job]:
+        with self.session_factory() as db:
+            return db.scalars(select(Job).order_by(Job.id.desc()).limit(limit)).all()
+
     async def shutdown(self) -> None:
         for task in self._tasks.values():
             task.cancel()
@@ -96,6 +116,10 @@ class JobRunner:
         try:
             summary = await handler(ctx)
         except asyncio.CancelledError:
+            if job_id in self._cancel_requested:
+                self._cancel_requested.discard(job_id)
+                ctx.update(state="cancelled", finished=datetime.now(UTC), message="Cancelled")
+                return
             # App shutting down: leave it 'running' so the next start resumes it.
             raise
         except Exception as exc:
