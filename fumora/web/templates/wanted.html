@@ -6,7 +6,8 @@
   <a href="/wanted" class="{{ 'active' if show == 'wanted' else '' }}">Wanted ({{ counts.wanted }})</a>
   <a href="/wanted?show=missing" class="{{ 'active' if show == 'missing' else '' }}">Missing, not monitored ({{ counts.missing }})</a>
 </nav>
-<p class="muted">{% if show == "wanted" %}Monitored, released, and no file yet. Downloads (M4) will search for these.{% else %}Released issues you don't have and aren't monitoring, e.g. old gaps found on import. Click ○ to monitor one, or use the series' Monitor options.{% endif %}</p>
+{% if show == "wanted" and issues %}<form method="post" action="/wanted/search"><button>Search all Wanted</button></form>{% endif %}
+<p class="muted">{% if show == "wanted" %}Monitored, released, and no file yet. "Search all Wanted" grabs the best release for each.{% else %}Released issues you don't have and aren't monitoring, e.g. old gaps found on import. Click ○ to monitor one, or use the series' Monitor options.{% endif %}</p>
 {% if issues %}
 <div class="scroll">
 <table class="log">

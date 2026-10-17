@@ -7,7 +7,7 @@ from fumora.main import create_app
 
 @pytest.fixture
 def config(tmp_path):
-    return Config(config_dir=tmp_path / "config", port=8792, scheduler=False)
+    return Config(config_dir=tmp_path / "config", port=8792, scheduler=False, download_monitor=False)
 
 
 @pytest.fixture
