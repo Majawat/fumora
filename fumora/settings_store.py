@@ -118,6 +118,24 @@ SETTINGS += [
     ),
 ]
 
+SETTINGS += [
+    SettingDef("prowlarr.url", "URL", "Indexers (Prowlarr)", help="e.g. http://192.168.9.10:9696"),
+    SettingDef("prowlarr.api_key", "API key", "Indexers (Prowlarr)", secret=True),
+    SettingDef("quality.min_mb", "Smallest single issue (MB)", "Quality", default="5",
+               help="Smaller releases are usually fakes or previews."),
+    SettingDef("quality.max_mb", "Largest single issue (MB)", "Quality", default="300"),
+    SettingDef("quality.max_collected_mb", "Largest collected edition or pack (MB)", "Quality",
+               default="2048"),
+    SettingDef("quality.ignore_words", "Ignore releases containing", "Quality",
+               default=".exe, .iso, pdf-xpost, preview, sample", allow_empty=True,
+               help="Comma-separated. Ebooks (EPUB, AZW3...) are recognised and skipped anyway."),
+    SettingDef("quality.preferred_groups", "Preferred groups", "Quality",
+               help="Comma-separated, e.g. Empire, DCP. Scores higher; never required."),
+    SettingDef("quality.blocked_groups", "Blocked groups", "Quality", help="Comma-separated; never grabbed."),
+    SettingDef("quality.protocols", "Protocols, in order", "Quality", default="usenet, torrent",
+               help="Remove one to never use it. Source ranking is fixed: digital, HD-Upscaled, then scans."),
+]  # fmt: skip
+
 SETTINGS_BY_KEY = {s.key: s for s in SETTINGS}
 
 

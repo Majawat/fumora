@@ -26,6 +26,7 @@ from .web.catalog_routes import register_catalog_routes
 from .web.library import register_library_routes
 from .web.library_admin import register_admin_routes
 from .web.monitor_routes import register_monitor_routes
+from .web.search_routes import register_search_routes
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 PUBLIC_PATHS = ("/static/", "/login", "/setup", "/api/health")
@@ -251,6 +252,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     register_admin_routes(app, templates, get_db)
     register_monitor_routes(app, templates, get_db)
     register_catalog_routes(app, templates, get_db)
+    register_search_routes(app, templates, get_db)
 
     @app.get("/api/health")
     def health():

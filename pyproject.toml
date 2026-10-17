@@ -37,6 +37,10 @@ extend-exclude = ["fumora/migrations/versions"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
 
+[tool.ruff.lint.per-file-ignores]
+# A table of real release titles; wrapping them would hurt readability.
+"tests/test_releases.py" = ["E501"]
+
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Form"]
 

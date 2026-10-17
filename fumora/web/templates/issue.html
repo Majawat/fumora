@@ -10,6 +10,13 @@
   <dt>Metron rating</dt><dd>{{ i.rating or "—" }}</dd>
   <dt>Files</dt><dd>{% for f in i.files %}<code class="path">{{ f.path }}</code><br>{% else %}—{% endfor %}</dd>
 </dl>
+<section class="card">
+  <h2>Search</h2>
+  <button class="secondary" hx-get="/issues/{{ i.id }}/search" hx-target="#search-results" hx-indicator="#search-wait">Search indexers</button>
+  <span id="search-wait" class="htmx-indicator muted small">Searching all indexers… this can take a minute.</span>
+  <div id="search-results"></div>
+</section>
+
 <form class="card" method="post" action="/issues/{{ i.id }}/edit">
   <h2>Age rating and tags for this issue</h2>
   <label>Age rating

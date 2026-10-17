@@ -1,0 +1,175 @@
+"""Choosing a release for an issue (M4): match, filter, score.
+
+The profile (#3): native digital > unknown > HD-Upscaled > scans; size limits;
+ignore words; preferred/blocked groups; usenet before torrents; single issues
+before packs.
+"""
+
+import math
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+
+from sqlalchemy.orm import Session
+
+from . import settings_store
+from .comicinfo import COLLECTED_TYPES
+from .models import Issue
+from .releases import ParsedRelease, matches_issue, matches_volume, parse_release
+
+SOURCE_SCORE = {"digital": 300, "unknown": 200, "upscaled": 150, "scan": 100}
+MB = 1024 * 1024
+
+
+@dataclass
+class Profile:
+    min_mb: float = 5
+    max_mb: float = 300
+    max_collected_mb: float = 2048
+    # Same default as the quality.ignore_words setting.
+    ignore_words: list[str] = field(
+        default_factory=lambda: [".exe", ".iso", "pdf-xpost", "preview", "sample"]
+    )
+    preferred_groups: list[str] = field(default_factory=list)
+    blocked_groups: list[str] = field(default_factory=list)
+    protocols: list[str] = field(default_factory=lambda: ["usenet", "torrent"])
+    allow_packs: bool = True
+
+
+def _list(value: str | None) -> list[str]:
+    return [v.strip() for v in (value or "").split(",") if v.strip()]
+
+
+def load_profile(db: Session) -> Profile:
+    p = Profile()
+
+    def num(key: str, default: float) -> float:
+        try:
+            return float(settings_store.get(db, key) or default)
+        except ValueError:
+            return default
+
+    p.min_mb = num("quality.min_mb", p.min_mb)
+    p.max_mb = num("quality.max_mb", p.max_mb)
+    p.max_collected_mb = num("quality.max_collected_mb", p.max_collected_mb)
+    if (words := settings_store.get(db, "quality.ignore_words")) is not None:
+        p.ignore_words = _list(words)
+    p.preferred_groups = _list(settings_store.get(db, "quality.preferred_groups"))
+    p.blocked_groups = _list(settings_store.get(db, "quality.blocked_groups"))
+    p.protocols = [x.lower() for x in _list(settings_store.get(db, "quality.protocols"))] or p.protocols
+    return p
+
+
+@dataclass
+class Candidate:
+    release: dict  # raw Prowlarr result (its downloadUrl stays server-side)
+    parsed: ParsedRelease
+    score: int = 0
+    rejections: list[str] = field(default_factory=list)
+    # The right series and issue, whatever the profile says about it.
+    identified: bool = False
+
+    @property
+    def accepted(self) -> bool:
+        return not self.rejections
+
+    @property
+    def size_mb(self) -> float:
+        return (self.release.get("size") or 0) / MB
+
+    @property
+    def protocol(self) -> str:
+        return self.release.get("protocol") or ""
+
+    @property
+    def age_days(self) -> int | None:
+        try:
+            published = datetime.fromisoformat(self.release["publishDate"].replace("Z", "+00:00"))
+        except (KeyError, ValueError, AttributeError):
+            return None
+        return (datetime.now(UTC) - published).days
+
+
+def _group_in(group: str | None, title: str, names: list[str]) -> bool:
+    hay = f"{group or ''} {title}".lower()
+    return any(n.lower() in hay for n in names)
+
+
+def evaluate(release: dict, issue: Issue, profile: Profile) -> Candidate:
+    rel = parse_release(release.get("title") or "")
+    c = Candidate(release=release, parsed=rel)
+    series = issue.series
+    names = [n for n in (series.name, series.mylar_name) if n]
+    collected = series.series_type in COLLECTED_TYPES
+    years = (series.year_began, issue.cover_date.year if issue.cover_date else None)
+
+    if collected:
+        # A collected edition only takes collected volumes, never single issue #N.
+        c.identified = matches_volume(rel, names, issue.number, strict=False)
+        if not matches_volume(rel, names, issue.number):
+            c.rejections.append(
+                "not this volume"
+                if not c.identified
+                else ("ebook" if rel.ebook else f"language: {rel.language}")
+            )
+    elif not matches_issue(rel, names, issue.number, years):
+        c.identified = matches_issue(rel, names, issue.number, years, strict=False)
+        if rel.ebook:
+            c.rejections.append("ebook, not a comic archive")
+        elif rel.language != "en":
+            c.rejections.append(f"language: {rel.language}")
+        elif rel.kind == "volume":
+            c.rejections.append("a collected volume, not this issue")
+        else:
+            c.rejections.append("not this issue")
+    else:
+        c.identified = True
+
+    size = c.size_mb
+    limit = profile.max_collected_mb if (collected or rel.kind == "range") else profile.max_mb
+    if size and size < profile.min_mb:
+        c.rejections.append(f"too small ({size:.0f} MB)")
+    if size > limit:
+        c.rejections.append(f"too big ({size:.0f} MB > {limit:.0f})")
+    title_l = (release.get("title") or "").lower()
+    if hit := next((w for w in profile.ignore_words if w.lower() in title_l), None):
+        c.rejections.append(f"ignored word: {hit}")
+    if profile.blocked_groups and _group_in(rel.group, title_l, profile.blocked_groups):
+        c.rejections.append("blocked group")
+    if c.protocol not in profile.protocols:
+        c.rejections.append(f"{c.protocol} disabled")
+    if c.protocol == "torrent" and (release.get("seeders") or 0) == 0:
+        c.rejections.append("no seeders")
+    if rel.kind == "range" and not profile.allow_packs:
+        c.rejections.append("packs disabled")
+
+    score = SOURCE_SCORE.get(rel.source, 200)
+    if "mobile" in title_l:  # "digital-mobile": smaller, phone-sized pages
+        score -= 50
+    if c.protocol in profile.protocols:
+        score += 60 * (len(profile.protocols) - profile.protocols.index(c.protocol))
+    if profile.preferred_groups and _group_in(rel.group, title_l, profile.preferred_groups):
+        score += 100
+    if rel.kind == "issue":
+        score += 40
+    if c.protocol == "torrent":
+        score += min(30, int(10 * math.log10((release.get("seeders") or 0) + 1)))
+    c.score = score
+    return c
+
+
+def rank(candidates: list[Candidate]) -> list[Candidate]:
+    """Accepted first, best score first; ties go to the larger (more complete) file."""
+    return sorted(candidates, key=lambda c: (not c.accepted, -c.score, -(c.release.get("size") or 0)))
+
+
+def queries_for(issue: Issue) -> list[str]:
+    """One search per series name: indexers return many issues at once."""
+    return [n for n in dict.fromkeys([issue.series.name, issue.series.mylar_name]) if n]
+
+
+def fallback_queries(issue: Issue) -> list[str]:
+    """Issue-specific searches, for when the series-name results (newest first,
+    capped by indexers) don't reach an older issue."""
+    n = issue.number
+    padded = n.zfill(3) if n.isdigit() else n
+    return [f"{name} {padded}" for name in queries_for(issue)]
