@@ -20,6 +20,7 @@ from .library_jobs import ORGANIZE, RETAG, SCAN, make_organize_handler, make_ret
 from .metron import MetronAuthError, MetronClient, MetronError, RateLimiter
 from .models import Event, Issue, Series, User
 from .web.library import register_library_routes
+from .web.library_admin import register_admin_routes
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 PUBLIC_PATHS = ("/static/", "/login", "/setup", "/api/health")
@@ -224,6 +225,7 @@ def create_app(config: Config | None = None) -> FastAPI:
         return templates.TemplateResponse(request, "_test_result.html", {"ok": ok, "message": message})
 
     register_library_routes(app, templates, get_db)
+    register_admin_routes(app, templates, get_db)
 
     @app.get("/api/health")
     def health():

@@ -5,7 +5,7 @@ import pytest
 
 from fumora import cbz
 from fumora.models import File, Issue, Series
-from fumora.tagging import NotWritable, plan_file, tag_file
+from fumora.tagging import NotWritable, check_writable, tag_file
 from tests.helpers import make_cbz, metron_issue
 from tests.test_comicinfo import EXISTING
 
@@ -81,11 +81,14 @@ def test_write_then_nothing_left_to_change(app, tmp_path):
     assert tag_file(issue, f, dry_run=True)["fields"] == {}
 
 
-def test_unconfirmed_match_is_not_written(app, tmp_path):
+def test_unconfirmed_match_previews_but_is_not_written(app, tmp_path):
     db, issue, f = _series_with_file(app, tmp_path, confirmed=None)
-    with pytest.raises(NotWritable):
-        plan_file(issue, f)
+    before = open(f.path, "rb").read()
+    assert tag_file(issue, f, dry_run=True)["fields"]  # preview helps decide
     assert "not confirmed" in tag_file(issue, f, dry_run=False)["error"]
+    assert open(f.path, "rb").read() == before
+    with pytest.raises(NotWritable):
+        check_writable(issue.series, f)
 
 
 def test_unreadable_cbr_reports_error(app, tmp_path):

@@ -116,6 +116,10 @@ async def ensure_detail(db: Session, client: MetronClient, issue: Issue) -> None
 def check_writable(series: Series, file: File) -> None:
     if not series.writable:
         raise NotWritable("Metron match not confirmed")
+    check_format(file)
+
+
+def check_format(file: File) -> None:
     if not cbz.is_cbz(file.path) and not convert.needs_conversion(file.path):
         raise NotWritable(f"{file.path.rsplit('.', 1)[-1].upper()} files can't be tagged")
 
@@ -139,8 +143,9 @@ def _without_notes(xml: bytes) -> bytes:
 
 
 def plan_file(issue: Issue, file: File) -> tuple[dict[str, bytes], dict[str, tuple]]:
-    """New metadata files for `file` and the ComicInfo fields that would change."""
-    check_writable(issue.series, file)
+    """New metadata files for `file` and the ComicInfo fields that would change.
+    Works for unconfirmed matches too (a preview helps decide); writing checks."""
+    check_format(file)
     converting = convert.needs_conversion(file.path)
     if converting and convert.sniff(file.path) != "zip":
         comicinfo = convert.read_member(file.path, cbz.COMICINFO)
@@ -170,6 +175,8 @@ def tag_file(issue: Issue, file: File, dry_run: bool, recycle_dir: str = DEFAULT
     CBR/CB7/CBT files are converted to CBZ first (originals go to the recycle folder).
     """
     try:
+        if not dry_run:
+            check_writable(issue.series, file)
         files, changes = plan_file(issue, file)
         # Only rewrite when something real changes: a rewrite copies the whole
         # archive, makes readers rescan it and breaks torrent hardlinks.

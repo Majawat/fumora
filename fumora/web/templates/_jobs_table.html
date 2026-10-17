@@ -1,0 +1,20 @@
+<div class="scroll">
+<table class="log">
+  <thead><tr><th>#</th><th>Job</th><th>State</th><th>Progress</th><th>Started (UTC)</th><th>Result</th><th></th></tr></thead>
+  <tbody>
+  {% for j in jobs %}
+  <tr class="{{ 'error' if j.state == 'failed' else '' }}">
+    <td>{{ j.id }}</td>
+    <td>{{ j.kind|replace("_", " ") }}{% if j.params and j.params.get("dry_run") is not none %} ({{ "preview" if j.params.dry_run else "write" }}){% endif %}</td>
+    <td>{{ j.state }}{% if j.phase and j.state == "running" %} · {{ j.phase }}{% endif %}</td>
+    <td>{% if j.total %}{% if j.state == "running" %}<progress max="{{ j.total }}" value="{{ j.progress }}"></progress> {% endif %}{{ j.progress }}/{{ j.total }}{% endif %}</td>
+    <td>{{ j.started.strftime('%Y-%m-%d %H:%M') if j.started else "" }}</td>
+    <td class="small">{{ j.message or "" }}</td>
+    <td>{% if j.state in ("queued", "running") %}<form method="post" action="/jobs/{{ j.id }}/cancel"><button class="secondary small">Cancel</button></form>{% endif %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="7" class="muted">No jobs yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>

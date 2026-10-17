@@ -5,7 +5,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 
 from . import naming, settings_store
@@ -53,6 +53,10 @@ def make_retag_handler(make_client: Callable[[str, str], MetronClient]):
             q = select(Issue.id).join(Series).where(Issue.files.any()).order_by(Series.id, Issue.sort_number)
             if ids:
                 q = q.where(Series.id.in_(ids))
+            if not ids or not dry_run:
+                # Library-wide runs and writes skip unconfirmed matches entirely
+                # (no Metron requests spent on files that can't be written).
+                q = q.where(or_(Series.match_status != "matched", Series.confirmed_by.is_not(None)))
             issue_ids = db.scalars(q).all()
         if not user or not password:
             raise RuntimeError("Metron username and password are not set")
