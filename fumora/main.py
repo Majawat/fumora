@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import __version__, settings_store
+from . import __version__, monitoring, settings_store
 from .auth import hash_password, load_or_create_secret, verify_password
 from .config import Config, load_config
 from .db import make_engine, make_session_factory, upgrade_db
@@ -19,8 +20,12 @@ from .jobs import JobRunner
 from .library_jobs import ORGANIZE, RETAG, SCAN, make_organize_handler, make_retag_handler, make_scan_handler
 from .metron import MetronAuthError, MetronClient, MetronError, RateLimiter
 from .models import Event, Issue, Series, User
+from .refresh import REFRESH, make_refresh_handler
+from .scheduler import run_scheduler
+from .web.catalog_routes import register_catalog_routes
 from .web.library import register_library_routes
 from .web.library_admin import register_admin_routes
+from .web.monitor_routes import register_monitor_routes
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 PUBLIC_PATHS = ("/static/", "/login", "/setup", "/api/health")
@@ -44,11 +49,15 @@ def create_app(config: Config | None = None) -> FastAPI:
     jobs.register(SCAN, make_scan_handler())
     jobs.register(RETAG, make_retag_handler(make_metron_client))
     jobs.register(ORGANIZE, make_organize_handler())
+    jobs.register(REFRESH, make_refresh_handler(make_metron_client))
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         jobs.resume_all()
+        scheduler = asyncio.create_task(run_scheduler(SessionLocal, jobs)) if config.scheduler else None
         yield
+        if scheduler:
+            scheduler.cancel()
         await jobs.shutdown()
         engine.dispose()
 
@@ -159,7 +168,7 @@ def create_app(config: Config | None = None) -> FastAPI:
                 select(func.count()).select_from(Series).where(Series.monitored.is_(True))
             ),
             "issues": db.scalar(select(func.count()).select_from(Issue)),
-            "wanted": db.scalar(select(func.count()).select_from(Issue).where(Issue.status == "Wanted")),
+            "wanted": monitoring.counts(db)["wanted"],
         }
         events = db.scalars(select(Event).order_by(Event.ts.desc()).limit(20)).all()
         metron_ready = settings_store.is_set(db, "metron.username") and settings_store.is_set(
@@ -226,6 +235,8 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     register_library_routes(app, templates, get_db)
     register_admin_routes(app, templates, get_db)
+    register_monitor_routes(app, templates, get_db)
+    register_catalog_routes(app, templates, get_db)
 
     @app.get("/api/health")
     def health():

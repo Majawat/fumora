@@ -1,0 +1,1 @@
+<button class="mon {{ 'on' if i.monitored else 'off' }}" hx-post="/issues/{{ i.id }}/monitor" hx-swap="outerHTML" title="{{ 'Monitored: click to stop' if i.monitored else 'Not monitored: click to monitor' }}" aria-pressed="{{ 'true' if i.monitored else 'false' }}">{{ "●" if i.monitored else "○" }}</button>

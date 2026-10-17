@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Releases · Fumora{% endblock %}
+{% block content %}
+<h1>Releases</h1>
+<div class="row">
+  <a class="button secondary" href="/releases?week={{ prev.isoformat() }}">← Previous week</a>
+  <strong>Week of {{ start.strftime('%b %-d, %Y') }}</strong>
+  <a class="button secondary" href="/releases?week={{ next.isoformat() }}">Next week →</a>
+  <form method="post" action="/refresh"><button class="secondary small">Refresh from Metron now</button></form>
+</div>
+<p class="muted small">From Metron's store dates. Last refresh: {{ last_refresh[:16].replace('T', ' ') ~ ' UTC' if last_refresh else "never" }}{% if refresh_job and refresh_job.state == "running" %} · refresh running{% endif %}. The schedule covers last week to three weeks ahead.</p>
+
+<h2>Your series this week ({{ mine|length }})</h2>
+{% if mine %}
+<table class="log">
+  <thead><tr><th>Series</th><th>#</th><th>Date</th><th>State</th></tr></thead>
+  <tbody>
+  {% for r in mine %}{% set s = ours[r.metron_series_id] %}{% set i = issues.get(r.metron_issue_id) %}
+  <tr>
+    <td><a href="/series/{{ s.id }}">{{ s.name }}{% if s.year_began %} ({{ s.year_began }}){% endif %}</a></td>
+    <td>{% if i %}<a href="/issues/{{ i.id }}">{{ r.number }}</a>{% else %}{{ r.number }}{% endif %}</td>
+    <td>{{ r.store_date.strftime('%a %-d') }}</td>
+    <td>{% if i %}{% set st = issue_state(i) %}<span class="state {{ st|lower }}">{{ st }}</span>{% else %}<span class="muted small">not listed yet: refresh</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted">None of your series have an issue out this week.</p>{% endif %}
+
+{% if upcoming %}
+<h2>Coming up for monitored series (next 60 days)</h2>
+<table class="log">
+  <thead><tr><th>Date</th><th>Series</th><th>#</th></tr></thead>
+  <tbody>
+  {% for i in upcoming %}
+  <tr><td>{{ i.store_date or i.cover_date }}{% if not i.store_date %} <small class="muted">(cover date)</small>{% endif %}</td><td><a href="/series/{{ i.series.id }}">{{ i.series.name }}</a></td><td><a href="/issues/{{ i.id }}">{{ i.number }}</a></td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<details class="card">
+  <summary>Everything out this week ({{ total }})</summary>
+  {% for day, rows in days %}
+  <h3>{{ day.strftime('%A %b %-d') if day else "No date" }}</h3>
+  <ul class="plain">
+    {% for r in rows %}
+    <li>{% if r.metron_series_id in ours %}<a href="/series/{{ ours[r.metron_series_id].id }}">{{ r.series_name }}</a>{% else %}{{ r.series_name }}{% endif %}{% if r.series_year %} ({{ r.series_year }}){% endif %} #{{ r.number }}
+      {% if r.metron_series_id not in ours %}<a class="small" href="/add/{{ r.metron_series_id }}">add series</a>{% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="muted">No schedule stored for this week. Run a refresh, or pick a week within the stored range.</p>{% endfor %}
+</details>
+{% endblock %}

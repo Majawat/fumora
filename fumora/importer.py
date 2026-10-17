@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from .metron import MetronClient
 from .models import Event, File, Imprint, Issue, Publisher, Series
+from .monitoring import new_issue_monitored
 from .mylar import MylarSeries
 from .numbers import normalize_number, sort_number
 
@@ -56,6 +57,7 @@ def upsert_mylar(
                 year_began=ms.year,
                 path=ms.path,
                 monitored=ms.active,
+                monitor_new=ms.active,
                 mylar_type=ms.mylar_type,
                 series_type="Annual" if ms.is_annual else None,
                 age_rating_override=ms.age_rating,
@@ -92,7 +94,8 @@ def upsert_mylar(
                     cover_date=mi.cover_date,
                     store_date=mi.store_date,
                     status=mi.status,
-                    monitored=ms.active,
+                    # Monitored if Mylar wanted it or had it (a lost file then shows as Wanted).
+                    monitored=ms.active and mi.status in ("Wanted", "Downloaded"),
                     locked_fields=[],
                 )
                 db.add(issue)
@@ -362,7 +365,6 @@ async def sync_series_issues(db: Session, client: MetronClient, series: Series) 
     by_number: dict[str, Issue] = {}
     for issue in series.issues:
         by_number.setdefault(normalize_number(issue.number), issue)
-    today = date.today()
 
     async for mi in client.series_issues(series.metron_id):
         key = normalize_number(mi.get("number"))
@@ -375,12 +377,11 @@ async def sync_series_issues(db: Session, client: MetronClient, series: Series) 
         if issue is None:
             store = _parse_date(mi.get("store_date"))
             cover = _parse_date(mi.get("cover_date"))
-            released = (store or cover) is not None and (store or cover) <= today
+            added = series.added.date() if series.added else date.today()
             issue = Issue(
                 series=series,
                 number=mi.get("number") or "",
-                status="Wanted" if series.monitored and released else "Skipped",
-                monitored=series.monitored,
+                monitored=new_issue_monitored(series, store or cover, added),
                 match_status="new",
                 locked_fields=[],
             )

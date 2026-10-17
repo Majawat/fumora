@@ -179,3 +179,18 @@ def test_folder_only_move_lists_no_file_renames(app, tmp_path):
         assert plan.folder.new.endswith("Black Hole (1998)") and plan.files == []
         assert naming.apply_plan(db, s, plan) == (1, [])
         assert os.path.exists(i.files[0].path) and "(1998)/Black Hole 001 (1995).cbz" in i.files[0].path
+
+
+def test_folder_template_with_subfolders(app, tmp_path):
+    folder = tmp_path / "Dallas"
+    folder.mkdir()
+    with app.state.session_factory() as db:
+        s = _series(db, folder, name="Umbrella Academy: Dallas")
+        plan = naming.plan_series(s, folder_template="{Publisher}/{Series Title} ({Series Year})")
+        assert plan.folder.new == str(tmp_path / "Dark Horse" / "Umbrella Academy Dallas (2008)")
+        assert naming.apply_plan(db, s, plan) == (1, [])
+        assert (tmp_path / "Dark Horse" / "Umbrella Academy Dallas (2008)").is_dir()
+        assert (
+            naming.render_path("{Publisher}//{Series Title}", naming.context(s))
+            == "Dark Horse/Umbrella Academy Dallas"
+        )

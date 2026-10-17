@@ -5,7 +5,7 @@
 <h1>{{ s.name }} #{{ i.number }}</h1>
 <dl class="facts">
   <dt>Cover date</dt><dd>{{ i.cover_date or "—" }}</dd>
-  <dt>Status</dt><dd>{{ i.status }}</dd>
+  <dt>State</dt><dd>{% set st = issue_state(i) %}<span class="state {{ st|lower }}">{{ st }}</span> {% include "_monitor_cell.html" %}</dd>
   <dt>Metron</dt><dd>{% if i.metron_id %}<a href="https://metron.cloud/issue/{{ i.metron_id }}/" target="_blank" rel="noopener">#{{ i.metron_id }}</a>{% else %}not matched{% endif %}</dd>
   <dt>Metron rating</dt><dd>{{ i.rating or "—" }}</dd>
   <dt>Files</dt><dd>{% for f in i.files %}<code class="path">{{ f.path }}</code><br>{% else %}—{% endfor %}</dd>

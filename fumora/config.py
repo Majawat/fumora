@@ -14,6 +14,7 @@ from pathlib import Path
 class Config:
     config_dir: Path
     port: int
+    scheduler: bool = True
 
     @property
     def db_path(self) -> Path:
@@ -31,4 +32,5 @@ class Config:
 def load_config() -> Config:
     config_dir = Path(os.environ.get("FUMORA_CONFIG_DIR", "/config"))
     port = int(os.environ.get("FUMORA_PORT", "8792"))
-    return Config(config_dir=config_dir, port=port)
+    scheduler = os.environ.get("FUMORA_SCHEDULER", "1") != "0"
+    return Config(config_dir=config_dir, port=port, scheduler=scheduler)

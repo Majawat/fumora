@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Wanted · Fumora{% endblock %}
+{% block content %}
+<h1>Wanted</h1>
+<nav class="tabs">
+  <a href="/wanted" class="{{ 'active' if show == 'wanted' else '' }}">Wanted ({{ counts.wanted }})</a>
+  <a href="/wanted?show=missing" class="{{ 'active' if show == 'missing' else '' }}">Missing, not monitored ({{ counts.missing }})</a>
+</nav>
+<p class="muted">{% if show == "wanted" %}Monitored, released, and no file yet. Downloads (M4) will search for these.{% else %}Released issues you don't have and aren't monitoring, e.g. old gaps found on import. Click ○ to monitor one, or use the series' Monitor options.{% endif %}</p>
+{% if issues %}
+<div class="scroll">
+<table class="log">
+  <thead><tr><th></th><th>Series</th><th>#</th><th>Released</th></tr></thead>
+  <tbody>
+  {% for i in issues %}
+  <tr>
+    <td>{% include "_monitor_cell.html" %}</td>
+    <td><a href="/series/{{ i.series.id }}">{{ i.series.name }}{% if i.series.year_began %} ({{ i.series.year_began }}){% endif %}</a></td>
+    <td><a href="/issues/{{ i.id }}">{{ i.number }}</a></td>
+    <td>{{ i.store_date or i.cover_date or "" }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% if issues|length == 1000 %}<p class="muted">Showing the first 1,000.</p>{% endif %}
+{% else %}
+<p class="muted">Nothing here.</p>
+{% endif %}
+{% endblock %}

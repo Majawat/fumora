@@ -61,14 +61,31 @@
 </form>
 
 <section class="card">
+  <h2>Monitoring</h2>
+  <form method="post" action="/series/{{ s.id }}/monitoring" class="row">
+    <label class="inline"><input type="checkbox" name="monitored" value="true" {% if s.monitored %}checked{% endif %}> Monitor this series</label>
+    <label class="inline"><input type="checkbox" name="monitor_new" value="true" {% if s.monitor_new %}checked{% endif %}> Monitor new issues as Metron adds them</label>
+    <button class="secondary small">Save</button>
+  </form>
+  <form method="post" action="/series/{{ s.id }}/monitor-option" class="row">
+    <select name="option" aria-label="Monitor which issues">
+      {% for key, label in monitor_options.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+    </select>
+    <button class="secondary small">Apply</button>
+  </form>
+  <p class="muted small">Wanted = monitored, released, and no file. "Fill gaps" monitors missing issues between the first and last you have. Click ● / ○ in the issue list to change single issues.</p>
+</section>
+
+<section class="card">
   <h2>Files</h2>
   <div class="row">
     <form method="post" action="/series/{{ s.id }}/scan"><button class="secondary" {% if running %}disabled{% endif %}>Scan folder</button></form>
+    {% if s.metron_id %}<form method="post" action="/series/{{ s.id }}/refresh"><button class="secondary" {% if running %}disabled{% endif %}>Refresh from Metron</button></form>{% endif %}
     <form method="post" action="/series/{{ s.id }}/retag"><button class="secondary" {% if running %}disabled{% endif %}>Preview tags</button></form>
     <form method="post" action="/series/{{ s.id }}/retag"><input type="hidden" name="write" value="true"><button {% if running or not writable %}disabled{% endif %}>Write tags</button></form>
     <a class="button secondary" href="/series/{{ s.id }}?rename=1">Preview rename</a>
   </div>
-  {% for kind, j in jobs.items() %}{% if j %}
+  {% for kind, j in jobs.items() %}{% if j and j.state in ("queued", "running", "failed") %}
   <p class="muted small">{{ kind|capitalize }}: {{ j.state }}{% if j.state in ("queued", "running") and j.total %} · {{ j.progress }}/{{ j.total }}{% endif %}{% if j.message %} · {{ j.message }}{% endif %}</p>
   {% endif %}{% endfor %}
 
@@ -99,13 +116,14 @@
 <h2>Issues ({{ issues|length }})</h2>
 <div class="scroll">
 <table class="log">
-  <thead><tr><th>#</th><th>Cover date</th><th>Status</th><th>Rating</th><th>Metron</th><th>File</th><th>Tags</th></tr></thead>
+  <thead><tr><th></th><th>#</th><th>Cover date</th><th>State</th><th>Rating</th><th>Metron</th><th>File</th><th>Tags</th></tr></thead>
   <tbody>
   {% for i in issues %}
   <tr>
+    <td>{% include "_monitor_cell.html" %}</td>
     <td><a href="/issues/{{ i.id }}">{{ i.number }}</a></td>
     <td>{{ i.cover_date or "" }}</td>
-    <td>{{ i.status }}</td>
+    <td>{% set st = issue_state(i) %}<span class="state {{ st|lower }}">{{ st }}</span></td>
     <td>{{ i.rating if i.rating and i.rating != "Unknown" else "" }}</td>
     <td>{% if i.metron_id %}<a href="https://metron.cloud/issue/{{ i.metron_id }}/" target="_blank" rel="noopener">{{ "new" if i.match_status == "new" else "✓" }}</a>{% elif i.match_status == "unmatched" %}<span class="error">unmatched</span>{% endif %}</td>
     <td>{% for f in i.files %}<code class="path">{{ f.path.rsplit('/', 1)[-1] }}</code>{% endfor %}</td>
