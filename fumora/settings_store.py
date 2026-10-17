@@ -20,6 +20,8 @@ class SettingDef:
     default: str | None = None
     help: str = ""
     choices: tuple[tuple[str, str], ...] = ()
+    # An empty value is a real choice (e.g. "off"), not "use the default".
+    allow_empty: bool = False
 
 
 SETTINGS: list[SettingDef] = [
@@ -66,7 +68,7 @@ SETTINGS += [
         "Naming",
         default="{Series Title} ({Series Year})",
         help="Tokens: {Series Title} {Series TitleThe} {Series Year} {Volume} {Publisher} "
-        "{Series Type} {Format}",
+        "{Series Type} {Format}. A / makes subfolders, e.g. {Publisher}/{Series Title} ({Series Year}).",
     ),
     SettingDef(
         "naming.file_template",
@@ -102,6 +104,7 @@ SETTINGS += [
         "Daily Metron refresh (UTC, HH:MM)",
         "Schedule",
         default="05:00",
+        allow_empty=True,
         help="Fetches Metron's release schedule, refreshes series with new issues, then a batch "
         "of others. Reads only; it doesn't touch files. Leave empty to turn it off.",
     ),
@@ -134,6 +137,9 @@ def put_state(db: Session, key: str, value: str | None) -> None:
 
 def get(db: Session, key: str) -> str | None:
     row = db.get(Setting, key)
+    sdef = SETTINGS_BY_KEY.get(key)
+    if row is not None and row.value == "" and sdef is not None and sdef.allow_empty:
+        return ""
     if row is not None and row.value not in (None, ""):
         return row.value
     return SETTINGS_BY_KEY[key].default if key in SETTINGS_BY_KEY else None
@@ -171,6 +177,6 @@ def apply_form(db: Session, form: dict[str, str]) -> list[str]:
                 changed.append(sdef.key)
             continue
         if value != (get(db, sdef.key) or ""):
-            put(db, sdef.key, value or None)
+            put(db, sdef.key, value if (value or sdef.allow_empty) else None)
             changed.append(sdef.key)
     return changed

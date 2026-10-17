@@ -5,7 +5,7 @@ from datetime import date
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, not_, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from .. import monitoring
@@ -73,11 +73,7 @@ def register_monitor_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
             .limit(1000)
         )
         if show == "missing":
-            q = q.where(
-                or_(Issue.monitored.is_(False), Series.monitored.is_(False)),
-                not_(Issue.files.any()),
-                func.coalesce(Issue.store_date, Issue.cover_date) <= today,
-            )
+            q = q.where(monitoring.missing_clause(today))
         else:
             show = "wanted"
             q = q.where(monitoring.wanted_clause(today))

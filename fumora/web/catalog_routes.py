@@ -6,13 +6,13 @@ from itertools import groupby
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from .. import monitoring, settings_store
 from ..catalog import add_series, folder_for
 from ..metron import MetronError
-from ..models import Issue, Release, Series
+from ..models import Issue, Publisher, Release, Series
 from ..refresh import REFRESH, week_start
 
 
@@ -53,11 +53,11 @@ def register_catalog_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
             .where(
                 Series.monitored.is_(True),
                 Issue.monitored.is_(True),
-                Issue.store_date >= date.today(),
-                Issue.store_date < date.today() + timedelta(days=60),
+                func.coalesce(Issue.store_date, Issue.cover_date) >= date.today(),
+                func.coalesce(Issue.store_date, Issue.cover_date) < date.today() + timedelta(days=60),
             )
             .options(selectinload(Issue.series), selectinload(Issue.files))
-            .order_by(Issue.store_date)
+            .order_by(func.coalesce(Issue.store_date, Issue.cover_date))
         ).all()
         return templates.TemplateResponse(
             request,
@@ -79,7 +79,12 @@ def register_catalog_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
 
     @app.post("/refresh")
     async def refresh_now():
-        if app.state.jobs.active(REFRESH) is None:
+        active = app.state.jobs.active(REFRESH)
+        if active is not None and (active.params or {}).get("series_ids"):
+            raise HTTPException(
+                409, "A single-series refresh is running; start the full refresh when it finishes."
+            )
+        if active is None:
             app.state.jobs.start(REFRESH, {})
         return RedirectResponse("/jobs", status_code=303)
 
@@ -117,11 +122,13 @@ def register_catalog_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
                 detail = await client.series(metron_id)
         except MetronError as exc:
             raise HTTPException(502, str(exc)) from exc
+        pub = (detail.get("publisher") or {}).get("name")
         preview = Series(
             name=detail.get("name") or "",
             year_began=detail.get("year_began"),
             series_type=(detail.get("series_type") or {}).get("name"),
             volume=detail.get("volume"),
+            publisher=Publisher(name=pub) if pub else None,
         )
         return templates.TemplateResponse(
             request, "add_form.html", {"d": detail, "folder": folder_for(db, preview)}

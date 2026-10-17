@@ -81,6 +81,10 @@ def test_migration_0004_derives_monitoring_from_mylar_status(tmp_path):
     c = sqlite3.connect(db)
     c.execute("INSERT INTO series (id, name, monitored, locked_fields, added, match_status, source) "
               "VALUES (1, 'S', 1, '[]', '2026-10-16 10:00:00', 'matched', 'metron')")  # fmt: skip
+    c.execute("INSERT INTO series (id, name, monitored, locked_fields, added, match_status, source) "
+              "VALUES (2, 'Paused', 0, '[]', '2026-10-16 10:00:00', 'matched', 'metron')")  # fmt: skip
+    c.execute("INSERT INTO issue (id, series_id, number, status, monitored, locked_fields) "
+              "VALUES (9, 2, 'p1', 'Downloaded', 1, '[]')")  # fmt: skip
     rows = [
         (1, "1", "Downloaded", None, None),
         (2, "2", "Wanted", None, None),
@@ -97,5 +101,5 @@ def test_migration_0004_derives_monitoring_from_mylar_status(tmp_path):
     c.commit()
     command.upgrade(cfg, "head")
     got = dict(c.execute("SELECT number, monitored FROM issue").fetchall())
-    assert got == {"1": 1, "2": 1, "3": 0, "4": 0, "5": 1}
+    assert got == {"1": 1, "2": 1, "3": 0, "4": 0, "5": 1, "p1": 0}  # p1: series not active
     assert c.execute("SELECT monitor_new FROM series").fetchone()[0] == 1

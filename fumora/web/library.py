@@ -72,7 +72,16 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
     def detail_context(db: Session, series: Series, error: str | None = None, rename: bool = False) -> dict:
         issues = sorted(series.issues, key=lambda i: (i.sort_number is None, i.sort_number or 0, i.number))
         jobs = {kind: app.state.jobs.latest(kind) for kind in (SCAN, RETAG, ORGANIZE, "refresh")}
-        running = any(j and j.state in ("queued", "running") for j in jobs.values())
+
+        def busy(kind: str) -> bool:
+            j = jobs[kind]
+            if j is None or j.state not in ("queued", "running"):
+                return False
+            ids = (j.params or {}).get("series_ids") or []
+            # A refresh only blocks the page when it is refreshing this series.
+            return kind != "refresh" or series.id in ids
+
+        running = any(busy(k) for k in jobs)
         plan = None
         if rename:
             plan = naming.plan_series(

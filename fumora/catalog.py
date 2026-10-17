@@ -19,7 +19,7 @@ def folder_for(db: Session, series: Series) -> str:
     template = settings_store.get(db, "naming.folder_template") or naming.DEFAULT_FOLDER
     colon = settings_store.get(db, "naming.colon") or "delete"
     apostrophes = settings_store.get(db, "naming.apostrophes") or "remove"
-    return f"{root}/{naming.render(template, naming.context(series), colon, apostrophes)}"
+    return f"{root}/{naming.render_path(template, naming.context(series), colon, apostrophes)}"
 
 
 async def add_series(
@@ -46,10 +46,11 @@ async def add_series(
     series.path = folder_for(db, series)
     db.flush()
     await sync_series_issues(db, client, series)
-    series.issues_synced = datetime.now(UTC)
     if os.path.isdir(series.path):
         scan_folders(db, [series.id])
-    db.refresh(series)
+    db.flush()
+    db.refresh(series)  # reload issues with the files the scan linked
+    series.issues_synced = datetime.now(UTC)
     monitoring.apply_option(series, option)
     series.monitor_new = monitor_new
     log(

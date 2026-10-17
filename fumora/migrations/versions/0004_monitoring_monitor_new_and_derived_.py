@@ -23,9 +23,11 @@ def upgrade() -> None:
 
     # Data: monitoring becomes the single stored choice (Wanted is derived).
     op.execute("UPDATE series SET monitor_new = monitored")
-    # Issues from Mylar: monitored if Mylar had them Wanted or Downloaded.
+    # Issues from Mylar: monitored if the series is active and Mylar had them
+    # Wanted or Downloaded (same rule as the importer).
     op.execute(
-        "UPDATE issue SET monitored = CASE WHEN status IN ('Wanted', 'Downloaded') THEN 1 ELSE 0 END "
+        "UPDATE issue SET monitored = CASE WHEN status IN ('Wanted', 'Downloaded') "
+        "AND (SELECT monitored FROM series WHERE series.id = issue.series_id) = 1 THEN 1 ELSE 0 END "
         "WHERE match_status IS NULL OR match_status != 'new'"
     )
     # Issues only Metron listed: old gaps (released before the series was added)

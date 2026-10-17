@@ -87,6 +87,15 @@ def context(series: Series, issue: Issue | None = None) -> dict[str, str]:
     return ctx
 
 
+def render_path(
+    template: str, ctx: dict[str, str], colon: str = "delete", apostrophes: str = "remove"
+) -> str:
+    """Like render, but "/" in the template makes subfolders (each part cleaned
+    on its own), e.g. "{Publisher}/{Series Title} ({Series Year})"."""
+    parts = [render(part, ctx, colon, apostrophes) for part in template.split("/") if part.strip()]
+    return "/".join(p for p in parts if p != "_") or "_"
+
+
 def render(template: str, ctx: dict[str, str], colon: str = "delete", apostrophes: str = "remove") -> str:
     def sub(m: re.Match) -> str:
         name, spec = m.group(1), m.group(2)
@@ -128,7 +137,7 @@ def plan_series(
     if not series.path:
         return OrganizePlan(None, [], ["Series has no folder"])
     parent = os.path.dirname(series.path.rstrip("/"))
-    target_folder = os.path.join(parent, render(folder_template, context(series), colon, apostrophes))
+    target_folder = os.path.join(parent, render_path(folder_template, context(series), colon, apostrophes))
     folder = None
     if target_folder != series.path and not shared_folder:
         folder = Rename(None, None, series.path, target_folder)
@@ -177,6 +186,8 @@ def apply_plan(db, series: Series, plan: OrganizePlan) -> tuple[int, list[str]]:
         if os.path.exists(plan.folder.new):
             return 0, problems + [f"Folder already exists: {os.path.basename(plan.folder.new)}"]
         try:
+            # A template with "/" (e.g. {Publisher}/...) can need a new parent folder.
+            os.makedirs(os.path.dirname(plan.folder.new), exist_ok=True)
             os.rename(plan.folder.old, plan.folder.new)
         except OSError as exc:
             return 0, problems + [f"Folder not renamed: {exc}"]

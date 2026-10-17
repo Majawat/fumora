@@ -59,12 +59,20 @@ def week_start(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
 
-async def update_releases(db: Session, client: MetronClient, today: date | None = None) -> int:
-    """Store Metron's schedule from last week to three weeks ahead."""
+def schedule_window(today: date | None = None) -> tuple[date, date]:
+    """Last week's Monday to the Sunday three weeks ahead."""
     start = week_start(today or date.today()) - timedelta(days=7)
-    end = start + timedelta(days=34)
+    return start, start + timedelta(days=34)
+
+
+async def update_releases(db: Session, client: MetronClient, today: date | None = None) -> int:
+    """Store Metron's schedule for the window; entries Metron no longer lists in
+    it (moved or deleted) are removed."""
+    start, end = schedule_window(today)
     n = 0
+    seen: set[int] = set()
     async for mi in client.releases_between(start.isoformat(), end.isoformat()):
+        seen.add(mi["id"])
         s = mi.get("series") or {}
         row = db.scalar(select(Release).where(Release.metron_issue_id == mi["id"]))
         if row is None:
@@ -79,6 +87,12 @@ async def update_releases(db: Session, client: MetronClient, today: date | None 
         row.image = mi.get("image")
         row.fetched = datetime.now(UTC)
         n += 1
+    for gone in db.scalars(
+        select(Release).where(
+            Release.store_date >= start, Release.store_date <= end, Release.metron_issue_id.not_in(seen)
+        )
+    ):
+        db.delete(gone)
     # Forget schedule entries older than eight weeks.
     cutoff = start - timedelta(days=49)
     for old in db.scalars(select(Release).where(Release.store_date < cutoff)):
@@ -101,7 +115,12 @@ async def _retrying(ctx: JobContext, call):
 def rolling_selection(db: Session, batch: int, now: datetime) -> list[int]:
     """Series to refresh today: those with an issue on the release schedule,
     then up to `batch` others that are due, least recently checked first."""
-    on_schedule = set(db.scalars(select(Release.metron_series_id)))
+    start, end = schedule_window(now.date())
+    on_schedule = set(
+        db.scalars(
+            select(Release.metron_series_id).where(Release.store_date >= start, Release.store_date <= end)
+        )
+    )
     matched = Series.match_status == "matched"
     releasing = db.scalars(
         select(Series.id).where(matched, Series.metron_id.in_(on_schedule)).order_by(Series.id)
