@@ -1,11 +1,19 @@
 """Metron API client.
 
-Metron allows a burst of 20 requests and 5,000 per day per user, and reports
-both in X-Ratelimit-* headers. Every request goes through one RateLimiter so
-the whole app shares the budget.
+Metron allows 20 requests a minute ("burst") and a daily quota ("sustained",
+5,000 to start), per account, reported in X-RateLimit-* headers on every
+response. A 429 response carries Retry-After. Every request in the process
+goes through one RateLimiter, which:
+
+- spaces requests evenly: at most `per_minute` a minute (default 20);
+- stops when the account's burst window is nearly used up (the headers are
+  account-wide, so this also covers other apps on the same account);
+- after a 429 blocks *every* request for Retry-After seconds;
+- refuses with MetronDailyLimitReached when the daily quota is spent.
 """
 
 import asyncio
+import logging
 import time
 from collections.abc import AsyncIterator, Callable
 from typing import Any
@@ -14,6 +22,13 @@ import httpx
 
 BASE_URL = "https://metron.cloud/api/"
 USER_AGENT = "Fumora/0.1 (+https://github.com/Majawat/fumora)"
+DEFAULT_PER_MINUTE = 20
+# A 429 without Retry-After (Metron always sends one) waits this long.
+DEFAULT_RETRY_AFTER = 60.0
+# Give up on one request after this many 429s in a row; the job then pauses.
+MAX_RATE_LIMITED = 20
+
+log = logging.getLogger("fumora.metron")
 
 
 class MetronError(Exception):
@@ -24,68 +39,110 @@ class MetronAuthError(MetronError):
     pass
 
 
-class MetronDailyLimitReached(MetronError):
-    def __init__(self, reset_at: float):
-        super().__init__(f"Metron daily limit reached; resets at {time.ctime(reset_at)}")
+class MetronPause(MetronError):
+    """Metron says stop for a while. Jobs wait until `reset_at` and carry on
+    with the same item (they never skip ahead and fire again)."""
+
+    def __init__(self, message: str, reset_at: float):
+        super().__init__(message)
         self.reset_at = reset_at
 
 
-class RateLimiter:
-    """Spaces requests and obeys Metron's rate-limit headers.
+class MetronDailyLimitReached(MetronPause):
+    def __init__(self, reset_at: float):
+        super().__init__(f"Metron daily limit reached; resets at {time.ctime(reset_at)}", reset_at)
 
-    - Never sends faster than one request per `min_interval` seconds.
-    - When the burst budget is spent, waits until the burst window resets.
-    - When the daily budget is spent, refuses with MetronDailyLimitReached
-      instead of blocking for hours.
-    """
+
+class MetronRateLimited(MetronPause):
+    def __init__(self, reset_at: float):
+        super().__init__("Metron keeps rate-limiting requests; pausing", reset_at)
+
+
+class RateLimiter:
+    """One per process: paces every Metron request (see the module docstring)."""
 
     def __init__(
         self,
-        min_interval: float = 1.0,
+        per_minute: int = DEFAULT_PER_MINUTE,
+        headroom: int = 1,
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], Any] = asyncio.sleep,
+        min_interval: float | None = None,
     ):
+        self.per_minute = per_minute
+        self.headroom = headroom
+        # Tests pass min_interval=0 to skip the pacing delay.
         self.min_interval = min_interval
         self._clock = clock
         self.sleep = sleep
         self._lock = asyncio.Lock()
         self._last_sent = 0.0
+        self.blocked_until = 0.0
+        self.burst_limit: int | None = None
         self.burst_remaining: int | None = None
         self.burst_reset: float | None = None
         self.sustained_remaining: int | None = None
         self.sustained_reset: float | None = None
+        self.rejected = 0  # 429s seen since start
+        self.last_rejected: float | None = None
+
+    @property
+    def interval(self) -> float:
+        if self.min_interval is not None:
+            return self.min_interval
+        limit = min(self.per_minute, self.burst_limit or self.per_minute)
+        return 60.0 / max(limit, 1)
+
+    def _wait(self, now: float) -> float:
+        wait = max(self.blocked_until - now, self._last_sent + self.interval - now)
+        if (
+            self.burst_remaining is not None
+            and self.burst_remaining <= self.headroom
+            and self.burst_reset is not None
+            and self.burst_reset > now
+        ):
+            wait = max(wait, self.burst_reset - now + 1)
+        return wait
 
     async def acquire(self) -> None:
         async with self._lock:
-            now = self._clock()
-            if (
-                self.sustained_remaining is not None
-                and self.sustained_remaining <= 0
-                and self.sustained_reset is not None
-                and now < self.sustained_reset
-            ):
-                raise MetronDailyLimitReached(self.sustained_reset)
-
-            wait = 0.0
-            if (
-                self.burst_remaining is not None
-                and self.burst_remaining <= 0
-                and self.burst_reset is not None
-            ):
-                wait = max(wait, self.burst_reset - now)
-            wait = max(wait, self._last_sent + self.min_interval - now)
-            if wait > 0:
+            while True:
+                now = self._clock()
+                if (
+                    self.sustained_remaining is not None
+                    and self.sustained_remaining <= 0
+                    and self.sustained_reset is not None
+                    and now < self.sustained_reset
+                ):
+                    raise MetronDailyLimitReached(self.sustained_reset)
+                wait = self._wait(now)
+                if wait <= 0:
+                    break
                 await self.sleep(wait)
             self._last_sent = self._clock()
+            if self.burst_remaining is not None:
+                self.burst_remaining -= 1  # until the response tells us the real number
+
+    def block(self, seconds: float) -> None:
+        """Hold every request for `seconds` (after a 429, an outage, ...)."""
+        self.blocked_until = max(self.blocked_until, self._clock() + seconds)
+
+    def on_rate_limited(self, retry_after: float | None) -> None:
+        self.rejected += 1
+        self.last_rejected = self._clock()
+        self.block(retry_after if retry_after and retry_after > 0 else DEFAULT_RETRY_AFTER)
+        log.warning("Metron answered 429; holding all requests for %.0fs", self.blocked_until - self._clock())
 
     def update(self, headers: httpx.Headers) -> None:
         def num(name: str) -> int | None:
             value = headers.get(name)
             try:
-                return int(value) if value is not None else None
+                return int(float(value)) if value is not None else None
             except ValueError:
                 return None
 
+        if (v := num("x-ratelimit-burst-limit")) is not None:
+            self.burst_limit = v
         if (v := num("x-ratelimit-burst-remaining")) is not None:
             self.burst_remaining = v
         if (v := num("x-ratelimit-burst-reset")) is not None:
@@ -125,29 +182,41 @@ class MetronClient:
         await self.aclose()
 
     async def _get(self, path: str, params: dict | None = None) -> dict:
-        for attempt in range(self._max_retries + 1):
+        failures = 0  # network errors and 5xx
+        rate_limited = 0
+        while True:
             await self._limiter.acquire()
             try:
                 resp = await self._http.get(path, params=params)
             except httpx.TransportError as exc:
-                if attempt < self._max_retries:
-                    await self._limiter.sleep(5.0 * (attempt + 1))
-                    continue
-                raise MetronError(f"Could not reach Metron ({type(exc).__name__})") from exc
-            self._limiter.update(resp.headers)
-            if resp.status_code == 429 and attempt < self._max_retries:
-                retry_after = resp.headers.get("retry-after")
-                await self._limiter.sleep(float(retry_after) if retry_after else 60.0)
+                failures += 1
+                if failures > self._max_retries:
+                    raise MetronError(f"Could not reach Metron ({type(exc).__name__})") from exc
+                self._limiter.block(5.0 * failures)
                 continue
+            self._limiter.update(resp.headers)
+            if resp.status_code == 429:
+                rate_limited += 1
+                retry_after = resp.headers.get("retry-after")
+                try:
+                    seconds = float(retry_after) if retry_after else None
+                except ValueError:
+                    seconds = None
+                self._limiter.on_rate_limited(seconds)
+                if rate_limited >= MAX_RATE_LIMITED:
+                    raise MetronRateLimited(time.time() + 600)
+                continue  # acquire() now waits for everyone
             if resp.status_code in (401, 403):
                 raise MetronAuthError("Metron rejected the username or password")
-            if resp.status_code >= 500 and attempt < self._max_retries:
-                await self._limiter.sleep(5.0 * (attempt + 1))
+            if resp.status_code >= 500:
+                failures += 1
+                if failures > self._max_retries:
+                    raise MetronError(f"Metron {path} returned HTTP {resp.status_code}")
+                self._limiter.block(10.0 * failures)
                 continue
             if resp.status_code >= 400:
                 raise MetronError(f"Metron {path} returned HTTP {resp.status_code}")
             return resp.json()
-        raise MetronError(f"Metron {path} failed after {self._max_retries} retries")
 
     async def _paged(
         self, path: str, params: dict | None = None, max_pages: int | None = None

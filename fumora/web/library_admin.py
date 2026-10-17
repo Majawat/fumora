@@ -1,5 +1,7 @@
 """Library-wide pages: Library (actions, untagged issues), Jobs, and per-issue edits."""
 
+import time
+
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -91,13 +93,17 @@ def register_admin_routes(app: FastAPI, templates: Jinja2Templates, get_db) -> N
         _start(RETAG, {"series_ids": [], "dry_run": not write})
         return RedirectResponse("/jobs", status_code=303)
 
+    def jobs_context() -> dict:
+        lim = app.state.metron_limiter
+        return {"jobs": app.state.jobs.recent(), "metron": lim, "now": time.time()}
+
     @app.get("/jobs", response_class=HTMLResponse)
     def jobs_page(request: Request):
-        return templates.TemplateResponse(request, "jobs.html", {"jobs": app.state.jobs.recent()})
+        return templates.TemplateResponse(request, "jobs.html", jobs_context())
 
     @app.get("/jobs/table", response_class=HTMLResponse)
     def jobs_table(request: Request):
-        return templates.TemplateResponse(request, "_jobs_table.html", {"jobs": app.state.jobs.recent()})
+        return templates.TemplateResponse(request, "_jobs_table.html", jobs_context())
 
     @app.post("/jobs/{job_id}/cancel")
     async def job_cancel(job_id: int, db: Session = Depends(get_db)):

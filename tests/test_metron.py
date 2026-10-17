@@ -4,9 +4,11 @@ import respx
 
 from fumora.metron import (
     BASE_URL,
+    MAX_RATE_LIMITED,
     MetronAuthError,
     MetronClient,
     MetronDailyLimitReached,
+    MetronPause,
     RateLimiter,
 )
 
@@ -28,12 +30,15 @@ def make_limiter(t, min_interval=1.0):
     return RateLimiter(min_interval=min_interval, clock=t.clock, sleep=t.sleep)
 
 
-async def test_limiter_spaces_requests():
+async def test_limiter_spaces_requests_evenly_at_20_a_minute():
     t = FakeTime()
-    limiter = make_limiter(t)
+    limiter = RateLimiter(clock=t.clock, sleep=t.sleep)  # defaults: 20 a minute
+    for _ in range(4):
+        await limiter.acquire()
+    assert t.slept == [pytest.approx(3.0)] * 3
+    limiter.per_minute = 10  # e.g. lowered in Settings
     await limiter.acquire()
-    await limiter.acquire()
-    assert t.slept == [pytest.approx(1.0)]
+    assert t.slept[-1] == pytest.approx(6.0)
 
 
 async def test_limiter_waits_for_burst_reset():
@@ -41,7 +46,7 @@ async def test_limiter_waits_for_burst_reset():
     limiter = make_limiter(t, min_interval=0)
     limiter.update(httpx.Headers({"x-ratelimit-burst-remaining": "0", "x-ratelimit-burst-reset": "1030"}))
     await limiter.acquire()
-    assert t.slept == [pytest.approx(30.0)]
+    assert t.slept == [pytest.approx(31.0)]  # until the reset, plus a second
 
 
 async def test_limiter_refuses_when_daily_budget_spent():
@@ -103,16 +108,50 @@ async def test_bad_login_raises_auth_error():
 
 
 @respx.mock
-async def test_429_is_retried_after_retry_after():
+async def test_429_holds_every_request_for_retry_after():
     t = FakeTime()
+    limiter = make_limiter(t, 0)
     route = respx.get(f"{BASE_URL}series/5/")
     route.side_effect = [
         httpx.Response(429, headers={"retry-after": "7"}),
         httpx.Response(200, json={"id": 5}),
     ]
-    async with MetronClient("u", "p", make_limiter(t, 0)) as client:
+    respx.get(f"{BASE_URL}series/6/").respond(200, json={"id": 6})
+    async with MetronClient("u", "p", limiter) as client:
         assert (await client.series(5))["id"] == 5
-    assert 7.0 in t.slept
+        assert t.slept == [pytest.approx(7.0)]
+        assert limiter.rejected == 1 and limiter.last_rejected is not None
+        limiter.on_rate_limited(30)  # another request was told to wait 30s...
+        await client.series(6)  # ...so this one waits too, instead of firing right away
+    assert t.slept[-1] == pytest.approx(30.0)
+
+
+@respx.mock
+async def test_429_without_retry_after_waits_a_minute():
+    t = FakeTime()
+    respx.get(f"{BASE_URL}series/5/").side_effect = [httpx.Response(429), httpx.Response(200, json={"id": 5})]
+    async with MetronClient("u", "p", make_limiter(t, 0)) as client:
+        await client.series(5)
+    assert t.slept == [pytest.approx(60.0)]
+
+
+@respx.mock
+async def test_endless_429s_pause_the_job_instead_of_moving_on():
+    t = FakeTime()
+    route = respx.get(f"{BASE_URL}series/5/").respond(429, headers={"retry-after": "2"})
+    async with MetronClient("u", "p", make_limiter(t, 0)) as client:
+        with pytest.raises(MetronPause):
+            await client.series(5)
+    assert route.call_count == MAX_RATE_LIMITED
+    assert all(s == pytest.approx(2.0) for s in t.slept)
+
+
+async def test_limiter_keeps_headroom_for_other_clients():
+    t = FakeTime()
+    limiter = make_limiter(t, 0)
+    limiter.update(httpx.Headers({"x-ratelimit-burst-remaining": "1", "x-ratelimit-burst-reset": "1040"}))
+    await limiter.acquire()
+    assert t.slept == [pytest.approx(41.0)]
 
 
 @respx.mock
