@@ -96,7 +96,32 @@ SETTINGS += [
     ),
 ]
 
+SETTINGS += [
+    SettingDef(
+        "schedule.refresh_time",
+        "Daily Metron refresh (UTC, HH:MM)",
+        "Schedule",
+        default="05:00",
+        help="Fetches what changed on Metron since the last run: new issues, dates, ratings. "
+        "Reads only; it doesn't touch files. Leave empty to turn it off.",
+    ),
+]
+
 SETTINGS_BY_KEY = {s.key: s for s in SETTINGS}
+
+
+def get_state(db: Session, key: str) -> str | None:
+    """Internal state (e.g. when the last refresh ran); not shown on the Settings page."""
+    row = db.get(Setting, f"state.{key}")
+    return row.value if row else None
+
+
+def put_state(db: Session, key: str, value: str | None) -> None:
+    row = db.get(Setting, f"state.{key}")
+    if row is None:
+        db.add(Setting(key=f"state.{key}", value=value))
+    else:
+        row.value = value
 
 
 def get(db: Session, key: str) -> str | None:

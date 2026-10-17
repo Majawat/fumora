@@ -71,7 +71,7 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
 
     def detail_context(db: Session, series: Series, error: str | None = None, rename: bool = False) -> dict:
         issues = sorted(series.issues, key=lambda i: (i.sort_number is None, i.sort_number or 0, i.number))
-        jobs = {kind: app.state.jobs.latest(kind) for kind in (SCAN, RETAG, ORGANIZE)}
+        jobs = {kind: app.state.jobs.latest(kind) for kind in (SCAN, RETAG, ORGANIZE, "refresh")}
         running = any(j and j.state in ("queued", "running") for j in jobs.values())
         plan = None
         if rename:

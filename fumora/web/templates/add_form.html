@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Add {{ d.name }} · Fumora{% endblock %}
+{% block content %}
+<p><a href="/add">← Search</a></p>
+<h1>{{ d.name }}{% if d.year_began %} ({{ d.year_began }}){% endif %}</h1>
+<dl class="facts">
+  <dt>Publisher</dt><dd>{{ (d.publisher or {}).get('name', '—') }}</dd>
+  <dt>Type</dt><dd>{{ (d.series_type or {}).get('name', '—') }}</dd>
+  <dt>Issues on Metron</dt><dd>{{ d.issue_count }}</dd>
+  <dt>Status</dt><dd>{{ d.status or "—" }}</dd>
+  <dt>Folder</dt><dd><code>{{ folder }}</code> <small class="muted">(created when the first file arrives)</small></dd>
+</dl>
+{% if d.desc %}<p class="muted">{{ d.desc[:400] }}{% if d.desc|length > 400 %}…{% endif %}</p>{% endif %}
+<form class="card" method="post" action="/add/{{ d.id }}">
+  <label>Monitor
+    <select name="option">
+      {% for key, label in monitor_options.items() %}<option value="{{ key }}" {% if key == "future" %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    <small>Wanted = monitored, released, and no file. If the folder already exists, its files are linked first, so "Missing" and "Fill gaps" know what you have.</small>
+  </label>
+  <label class="inline"><input type="checkbox" name="monitor_new" value="true" checked> Monitor new issues as Metron adds them</label>
+  <p><button>Add series</button></p>
+</form>
+{% endblock %}

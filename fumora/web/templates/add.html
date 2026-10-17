@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Add series · Fumora{% endblock %}
+{% block content %}
+<h1>Add a series</h1>
+<form method="get" action="/add" class="row filters">
+  <input name="q" value="{{ q }}" placeholder="Series name, as on Metron" aria-label="Series name" autofocus>
+  <button>Search Metron</button>
+</form>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+{% if q and not results and not error %}<p class="muted">Nothing on Metron matches "{{ q }}". Missing series can be added on <a href="https://metron.cloud/" target="_blank" rel="noopener">metron.cloud</a>.</p>{% endif %}
+{% if results %}
+<div class="scroll">
+<table class="log">
+  <thead><tr><th>Series</th><th>Type</th><th>Issues</th><th></th></tr></thead>
+  <tbody>
+  {% for r in results %}
+  <tr>
+    <td><a href="https://metron.cloud/series/{{ r.id }}/" target="_blank" rel="noopener">{{ r.series }}</a><small class="muted why">{{ (r.publisher or {}).get('name', '') }}</small></td>
+    <td>{{ (r.series_type or {}).get('name', '') }}</td>
+    <td>{{ r.issue_count }}</td>
+    <td>{% if r.id in ours %}<a href="/series/{{ ours[r.id].id }}">In library</a>{% else %}<a class="button small" href="/add/{{ r.id }}">Add</a>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="muted small">Showing up to 100 results; narrow the search if yours isn't listed.</p>
+{% endif %}
+{% endblock %}

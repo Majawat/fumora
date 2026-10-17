@@ -260,6 +260,23 @@ class Job(Base):
     finished: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class Release(Base):
+    """An issue on Metron's release schedule (this week and the next few)."""
+
+    __tablename__ = "release"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    metron_issue_id: Mapped[int] = mapped_column(unique=True)
+    metron_series_id: Mapped[int] = mapped_column(index=True)
+    series_name: Mapped[str] = mapped_column(String(255))
+    series_year: Mapped[int | None]
+    number: Mapped[str] = mapped_column(String(20))
+    store_date: Mapped[date | None] = mapped_column(Date, index=True)
+    cover_date: Mapped[date | None] = mapped_column(Date)
+    image: Mapped[str | None] = mapped_column(String(500))
+    fetched: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Setting(Base):
     __tablename__ = "setting"
 

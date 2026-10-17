@@ -80,11 +80,12 @@
   <h2>Files</h2>
   <div class="row">
     <form method="post" action="/series/{{ s.id }}/scan"><button class="secondary" {% if running %}disabled{% endif %}>Scan folder</button></form>
+    {% if s.metron_id %}<form method="post" action="/series/{{ s.id }}/refresh"><button class="secondary" {% if running %}disabled{% endif %}>Refresh from Metron</button></form>{% endif %}
     <form method="post" action="/series/{{ s.id }}/retag"><button class="secondary" {% if running %}disabled{% endif %}>Preview tags</button></form>
     <form method="post" action="/series/{{ s.id }}/retag"><input type="hidden" name="write" value="true"><button {% if running or not writable %}disabled{% endif %}>Write tags</button></form>
     <a class="button secondary" href="/series/{{ s.id }}?rename=1">Preview rename</a>
   </div>
-  {% for kind, j in jobs.items() %}{% if j %}
+  {% for kind, j in jobs.items() %}{% if j and j.state in ("queued", "running", "failed") %}
   <p class="muted small">{{ kind|capitalize }}: {{ j.state }}{% if j.state in ("queued", "running") and j.total %} · {{ j.progress }}/{{ j.total }}{% endif %}{% if j.message %} · {{ j.message }}{% endif %}</p>
   {% endif %}{% endfor %}
 

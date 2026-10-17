@@ -82,3 +82,6 @@ button.mon.off { color: var(--muted); }
 nav.tabs { display: flex; gap: 1rem; flex-wrap: wrap; border-bottom: 1px solid var(--line); margin-bottom: .75rem; }
 nav.tabs a { padding: .4rem 0; text-decoration: none; color: var(--muted); }
 nav.tabs a.active { color: var(--fg); border-bottom: 2px solid var(--accent); font-weight: 600; }
+ul.plain { list-style: none; padding: 0; margin: 0 0 1rem; }
+ul.plain li { padding: .15rem 0; border-bottom: 1px solid var(--line); }
+a.button.small { padding: .2rem .6rem; font-size: .85rem; background: var(--accent); color: var(--accent-fg); }
