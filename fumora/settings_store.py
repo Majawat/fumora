@@ -102,8 +102,16 @@ SETTINGS += [
         "Daily Metron refresh (UTC, HH:MM)",
         "Schedule",
         default="05:00",
-        help="Fetches what changed on Metron since the last run: new issues, dates, ratings. "
-        "Reads only; it doesn't touch files. Leave empty to turn it off.",
+        help="Fetches Metron's release schedule, refreshes series with new issues, then a batch "
+        "of others. Reads only; it doesn't touch files. Leave empty to turn it off.",
+    ),
+    SettingDef(
+        "schedule.refresh_batch",
+        "Series rechecked per day",
+        "Schedule",
+        default="50",
+        help="Besides series with releases this week. Ongoing series are rechecked weekly, ended ones "
+        "monthly; each costs 2-3 Metron requests (5,000 a day allowed).",
     ),
 ]
 

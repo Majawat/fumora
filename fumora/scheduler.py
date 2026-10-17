@@ -31,6 +31,12 @@ async def run_scheduler(session_factory, jobs, check_every: int = CHECK_EVERY) -
             with session_factory() as db:
                 at = settings_store.get(db, "schedule.refresh_time")
                 last = settings_store.get_state(db, "schedule.refresh.last_day")
+                if last is None:
+                    # First start: begin with the next scheduled time rather than
+                    # spending Metron requests right away ("Refresh now" exists).
+                    settings_store.put_state(db, "schedule.refresh.last_day", now.date().isoformat())
+                    db.commit()
+                    last = now.date().isoformat()
                 if due(now, at, last) and jobs.active(REFRESH) is None:
                     settings_store.put_state(db, "schedule.refresh.last_day", now.date().isoformat())
                     db.commit()

@@ -30,61 +30,74 @@ SERIES_DETAIL = {
 
 
 @respx.mock
-async def test_incremental_refresh_updates_only_our_changed_series(app):
-    future = (date.today() + timedelta(days=10)).isoformat()
+async def test_daily_refresh_uses_releases_then_a_rolling_batch(app):
+    future = (date.today() + timedelta(days=3)).isoformat()
+    long_ago = datetime(2026, 1, 1)
+    recent = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1)
     sf = app.state.session_factory
     with sf() as db:
         settings_store.put(db, "metron.username", "u")
         settings_store.put(db, "metron.password", "p")
-        s = Series(name="Monthly", metron_id=500, match_status="matched", confirmed_by="auto",
-                   monitored=True, monitor_new=True, locked_fields=[],
-                   added=datetime(2026, 1, 1, tzinfo=UTC))  # fmt: skip
-        i1 = Issue(series=s, number="1", metron_id=5001, match_status="matched", monitored=True,
+        settings_store.put(db, "schedule.refresh_batch", "1")
+
+        def matched(name, mid, synced, year_end=None):
+            return Series(name=name, metron_id=mid, match_status="matched", confirmed_by="auto",
+                          monitored=True, monitor_new=True, locked_fields=[], issues_synced=synced,
+                          year_end=year_end, added=datetime(2026, 1, 1, tzinfo=UTC))  # fmt: skip
+
+        monthly = matched("Monthly", 500, recent)  # checked an hour ago, but has a release
+        i1 = Issue(series=monthly, number="1", metron_id=5001, match_status="matched", monitored=True,
                    metron_detail={"modified": "2026-10-16T09:00:00+00:00"}, locked_fields=[])  # fmt: skip
-        i2 = Issue(series=s, number="2", metron_id=5002, match_status="matched", monitored=True,
+        i2 = Issue(series=monthly, number="2", metron_id=5002, match_status="matched", monitored=True,
                    metron_detail={"modified": "2026-10-01T09:00:00+00:00"}, locked_fields=[])  # fmt: skip
         i1.files = [File(path="/x/1.cbz")]
-        db.add_all([s, i1, i2, Series(name="Not ours on Metron", locked_fields=[])])
+        old_ongoing = matched("Old ongoing", 600, long_ago)  # due: picked by the batch of 1
+        # Checked 10 days ago: an ongoing series would be due (weekly), an ended one isn't (monthly).
+        older_ended = matched("Ended", 700, recent - timedelta(days=10), year_end=2020)
+        fresh = matched("Fresh", 800, recent)  # not due
+        db.add_all([monthly, i1, i2, old_ongoing, older_ended, fresh])
         db.commit()
 
-    respx.get(f"{BASE_URL}series/").side_effect = lambda request: httpx.Response(
-        200, json=page([{"id": 500}, {"id": 999}]) if "modified_gt" in request.url.params else page([])
-    )
-    respx.get(f"{BASE_URL}series/500/").respond(200, json=SERIES_DETAIL)
-    issues = respx.get(f"{BASE_URL}issue/")
+    def series_detail(request):
+        sid = int(str(request.url).rstrip("/").rsplit("/", 1)[-1])
+        return httpx.Response(200, json={**SERIES_DETAIL, "id": sid})
+
+    respx.get(url__regex=rf"{BASE_URL}series/\d+/$").mock(side_effect=series_detail)
 
     def issue_route(request):
         p = request.url.params
-        if "modified_gt" in p:
-            return httpx.Response(200, json=page([{"id": 7, "series": {"id": 777}}]))
         if "store_date_range_after" in p:
             monthly = {"id": 500, "name": "Monthly", "year_began": 2025}
-            other = {"id": 800, "name": "Other", "year_began": 2020}
+            other = {"id": 900, "name": "Not ours", "year_began": 2020}
             return httpx.Response(200, json=page([
                 {"id": 5003, "number": "3", "store_date": future, "series": monthly},
-                {"id": 8001, "number": "12", "store_date": future, "series": other},
+                {"id": 9001, "number": "12", "store_date": future, "series": other},
             ]))  # fmt: skip
-        return httpx.Response(200, json=page([
-            {"id": 5001, "number": "1", "cover_date": "2025-01-01", "modified": "2026-10-16T09:00:00+00:00"},
-            {"id": 5002, "number": "2", "cover_date": "2025-02-01", "modified": "2026-10-17T09:00:00+00:00"},
-            {"id": 5003, "number": "3", "store_date": future, "modified": "2026-10-17T09:00:00+00:00"},
-        ]))  # fmt: skip
+        if p.get("series_id") == "500":
+            m16, m17 = "2026-10-16T09:00:00+00:00", "2026-10-17T09:00:00+00:00"
+            return httpx.Response(200, json=page([
+                {"id": 5001, "number": "1", "cover_date": "2025-01-01", "modified": m16},
+                {"id": 5002, "number": "2", "cover_date": "2025-02-01", "modified": m17},
+                {"id": 5003, "number": "3", "store_date": future, "modified": m17},
+            ]))  # fmt: skip
+        return httpx.Response(200, json=page([]))
 
-    issues.side_effect = issue_route
+    respx.get(f"{BASE_URL}issue/").mock(side_effect=issue_route)
     handler = make_refresh_handler(lambda u, p: client())
     summary = await handler(_job(app, "refresh", {}))
-    assert "Refreshed 1 series: 1 new issues, 1 issue records to re-fetch" in summary
+    assert "Refreshed 2 series: 1 new issues, 1 issue records to re-fetch" in summary
     assert "2 scheduled releases" in summary
+    fetched = {str(c.request.url) for c in respx.calls}
+    assert any(u.endswith("/series/500/") for u in fetched)  # release this week
+    assert any(u.endswith("/series/600/") for u in fetched)  # oldest due, batch of 1
+    assert not any(u.endswith("/series/700/") or u.endswith("/series/800/") for u in fetched)
+    assert not any("modified_gt" in u for u in fetched)  # no change feed
     with sf() as db:
         s = db.scalar(select(Series).where(Series.metron_id == 500))
         by = {i.number: i for i in s.issues}
-        assert by["3"].monitored and by["3"].store_date.isoformat() == future  # new, future: monitored
-        assert by["2"].metron_detail is None  # Metron changed it since we cached it
-        assert by["1"].metron_detail is not None
+        assert by["3"].monitored and by["3"].store_date.isoformat() == future
+        assert by["2"].metron_detail is None and by["1"].metron_detail is not None
         assert len(db.scalars(select(Release)).all()) == 2
-        assert settings_store.get_state(db, "refresh.last_success")
-    # Only the series (500) and its issue list/detail were fetched, nothing for 999 or 777.
-    assert not any("/series/999/" in str(c.request.url) for c in respx.calls)
 
 
 @respx.mock

@@ -1,16 +1,22 @@
 """Keeping the catalog current from Metron (M3).
 
-The daily refresh asks Metron what changed since the last run (series and
-issues with `modified_gt`), refreshes only the matched series among them, and
-updates the release schedule. It reads from Metron and writes Fumora's
-database; it never touches files.
+The daily refresh costs a predictable couple of hundred requests, whatever
+Metron itself is doing (Metron's change feed can list 60,000+ edited issues in
+a day after a bulk edit, so it isn't used):
+
+1. Fetch Metron's release schedule (last week to three weeks ahead). Matched
+   series with an issue in it are refreshed: that's how new issues arrive.
+2. Refresh a rolling batch of other matched series, least recently checked
+   first, to pick up corrections. Ended series are rechecked monthly.
+
+It reads from Metron and writes Fumora's database; it never touches files.
 """
 
 import asyncio
 import time
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from . import settings_store
@@ -20,7 +26,9 @@ from .metron import MetronAuthError, MetronClient, MetronDailyLimitReached, Metr
 from .models import Release, Series
 
 REFRESH = "refresh"
-FIRST_LOOKBACK = timedelta(days=7)
+DEFAULT_BATCH = 50
+ENDED_RECHECK = timedelta(days=30)
+ACTIVE_RECHECK = timedelta(days=7)
 
 
 def _utc(dt: datetime) -> datetime:
@@ -45,17 +53,6 @@ async def refresh_series(db: Session, client: MetronClient, series: Series) -> d
     series.issues_synced = datetime.now(UTC)
     db.flush()
     return {**counts, "stale": stale}
-
-
-async def changed_series_ids(client: MetronClient, since: datetime) -> set[int]:
-    """Metron series that changed, or had an issue change, since `since`."""
-    iso = since.astimezone(UTC).isoformat(timespec="seconds")
-    ids = {s["id"] async for s in client.series_modified_since(iso)}
-    async for issue in client.issues_modified_since(iso):
-        sid = (issue.get("series") or {}).get("id")
-        if sid:
-            ids.add(sid)
-    return ids
 
 
 def week_start(d: date) -> date:
@@ -101,6 +98,37 @@ async def _retrying(ctx: JobContext, call):
             ctx.update(message=None)
 
 
+def rolling_selection(db: Session, batch: int, now: datetime) -> list[int]:
+    """Series to refresh today: those with an issue on the release schedule,
+    then up to `batch` others that are due, least recently checked first."""
+    on_schedule = set(db.scalars(select(Release.metron_series_id)))
+    matched = Series.match_status == "matched"
+    releasing = db.scalars(
+        select(Series.id).where(matched, Series.metron_id.in_(on_schedule)).order_by(Series.id)
+    ).all()
+    active_due = _naive(now - ACTIVE_RECHECK)
+    ended_due = _naive(now - ENDED_RECHECK)
+    due = db.scalars(
+        select(Series.id)
+        .where(
+            matched,
+            Series.id.not_in(releasing),
+            or_(
+                Series.issues_synced.is_(None),
+                (Series.year_end.is_(None) & (Series.issues_synced < active_due)),
+                (Series.year_end.is_not(None) & (Series.issues_synced < ended_due)),
+            ),
+        )
+        .order_by(Series.issues_synced.is_not(None), Series.issues_synced)
+        .limit(batch)
+    ).all()
+    return list(releasing) + list(due)
+
+
+def _naive(dt: datetime) -> datetime:
+    return dt.astimezone(UTC).replace(tzinfo=None)
+
+
 def make_refresh_handler(make_client):
     async def run(ctx: JobContext) -> str:
         params = ctx.params()
@@ -110,26 +138,24 @@ def make_refresh_handler(make_client):
         with sf() as db:
             user = settings_store.get(db, "metron.username")
             password = settings_store.get(db, "metron.password")
-            last = settings_store.get_state(db, "refresh.last_success")
+            try:
+                batch = int(settings_store.get(db, "schedule.refresh_batch") or DEFAULT_BATCH)
+            except ValueError:
+                batch = DEFAULT_BATCH
         if not user or not password:
             raise RuntimeError("Metron username and password are not set")
-        since = _utc(datetime.fromisoformat(last)) if last else started - FIRST_LOOKBACK
 
         totals = {"series": 0, "new": 0, "stale": 0, "errors": 0}
+        releases = 0
         async with make_client(user, password) as client:
             if explicit:
                 ids = explicit
             else:
-                ctx.update(
-                    phase="changes", message=f"Asking Metron what changed since {since:%Y-%m-%d %H:%M} UTC"
-                )
-                changed = await _retrying(ctx, lambda: changed_series_ids(client, since))
+                ctx.update(phase="releases", message="Fetching Metron's release schedule")
                 with sf() as db:
-                    ids = db.scalars(
-                        select(Series.id).where(
-                            Series.match_status == "matched", Series.metron_id.in_(changed)
-                        )
-                    ).all()
+                    releases = await _retrying(ctx, lambda d=db: update_releases(d, client))
+                    db.commit()
+                    ids = rolling_selection(db, batch, started)
                 ctx.update(message=None)
             ctx.update(phase="series", progress=0, total=len(ids))
             for n, series_id in enumerate(ids, 1):
@@ -151,12 +177,6 @@ def make_refresh_handler(make_client):
                         log(db, f"Refresh failed for series {series_id}: {exc}", kind=REFRESH, level="error")
                         db.commit()
                 ctx.update(progress=n)
-            releases = 0
-            if not explicit:
-                ctx.update(phase="releases")
-                with sf() as db:
-                    releases = await _retrying(ctx, lambda d=db: update_releases(d, client))
-                    db.commit()
 
         summary = (
             f"Refreshed {totals['series']} series: {totals['new']} new issues, "
