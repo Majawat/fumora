@@ -26,33 +26,38 @@ Jinja2 + htmx. Image: `ghcr.io/majawat/fumora:edge` (built from `main`).
 | M3 monitoring, daily refresh, releases, add series | merged | #21 |
 | Metron rate limiting (after Metron's warning) | merged | #22 |
 | M4 part 1: release parser, Prowlarr search, decisions | merged | #23 |
-| **M4 part 2: grab, download monitor, import** | **branch `m4-downloads`, committed + pushed, no PR yet** | — |
+| **M4 part 2: grab, download monitor, import** | **PR open, awaiting owner merge** | #25 |
 | M5 GetComics, Anna's Archive (via Shelfmark), TPB links, Metron gaps page, GCD ratings | not started | — |
 | M6 side-by-side week with Mylar, cut over | not started | — |
 
 ### Where M4 part 2 stands
 
-- Code done, code-reviewed (10 findings fixed), 181 offline tests pass.
-- Deployed **only to the test instance** (local image `fumora:m4b`).
-- **Next step:** one live usenet grab on the test instance (a Wanted Private
-  Dance issue): set SABnzbd URL/key in fumora-test's settings, run a `search`
-  job for that issue, let the download monitor import it, verify the file
-  landed in `/data/media/comics-test/...`, was converted/named/tagged, and the
-  SABnzbd job folder was cleaned up. Then open the PR.
-- The test container mounts `/mnt/user/data/usenet/complete/fumora` read-write
-  (SABnzbd's `fumora` category folder, created 2026-10-17, owner
-  `nobody:users` 777).
+- Code done, code-reviewed (10 findings fixed), 182 offline tests pass.
+- **Live-tested 2026-10-17 on the test instance:** *Absolute Batman #24* was
+  searched, sent to SABnzbd (category `fumora`), downloaded, imported as
+  `Absolute Batman 024 (2026).cbz`, tagged, and the job folder cleaned up.
+  The first attempt correctly refused to import across two separate mounts
+  (the test container's layout); the test container now mounts
+  `/mnt/user/data/usenet` read-write and its *Absolute Batman* series folder
+  is `/data/usenet/fumora-test-library/...` so download and library share a
+  mount. Production mounts `/data` once and is unaffected.
+- Private Dance #1–4 have no single-issue releases; they only exist in
+  `Private.Dance.Vol.01-Season.One...TPB` (relevant to #5).
+- Imports get basic tags only; full Metron tags at import is #24.
 - qBittorrent: no credentials yet (none in the environment). Owner can enter
   them in Fumora's Settings. MyAnonamouse is a private tracker: torrents must
   be hardlinked and keep seeding; tagging torrent imports is off by default
   because rewriting the file breaks the hardlink.
+
+**Next:** owner merges M4 part 2; then production needs `/data` read-write
+(owner's OK) before it can import or write tags; then M5.
 
 ## Deployments (Hathor, 192.168.9.10)
 
 | Container | Port | Image | Notes |
 | --- | --- | --- | --- |
 | `fumora` (production) | 8792 | `ghcr.io/majawat/fumora:edge` | `/data` mounted **read-only**; scheduler on (daily Metron refresh 05:00 UTC) |
-| `fumora-test` | 8793 | local `fumora:m4b` | `FUMORA_SCHEDULER=0`; writable only `/data/media/comics-test` and SABnzbd's `fumora` folder |
+| `fumora-test` | 8793 | local `fumora:m4b` | `FUMORA_SCHEDULER=0`; writable only `/data/media/comics-test` and `/data/usenet` (downloads + `fumora-test-library`) |
 
 Unraid templates: `/boot/config/plugins/dockerMan/templates-user/my-fumora.xml`
 and `my-fumora-test.xml`. Recreate containers with the same `docker run`

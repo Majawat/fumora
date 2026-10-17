@@ -200,16 +200,22 @@ def _place_converted(src: Path, dest: Path) -> Path:
         tmp.with_suffix(".cbz").unlink(missing_ok=True)
 
 
-def _remove_download_folder(path: str, files_moved: list[Path]) -> None:
+def _remove_download_folder(path: str, category: str) -> None:
     """After a usenet import, remove the job's own folder if nothing useful is left.
 
-    Only a folder that the client reported as this download's location, never a
-    category or root folder, and never when the client reported a single file."""
-    folder = Path(path)
-    if not folder.is_dir() or folder.name.lower() in PROTECTED_DIRS or len(folder.parts) < 4:
+    The client may report the job folder or the file inside it. Only a folder
+    sitting directly inside the category folder (".../fumora/<job>") is removed;
+    the category folder and anything above it never are."""
+    p = Path(path)
+    folder = p if p.is_dir() else p.parent
+    if (
+        folder.name.lower() in PROTECTED_DIRS
+        or folder.name.lower() == category.lower()
+        or folder.parent.name.lower() != category.lower()
+    ):
         return
     try:
-        if not any(p.suffix.lower() in IMPORT_EXTS for p in folder.rglob("*") if p.is_file()):
+        if not any(x.suffix.lower() in IMPORT_EXTS for x in folder.rglob("*") if x.is_file()):
             shutil.rmtree(folder)
     except OSError:
         pass
@@ -238,7 +244,7 @@ def import_grab(db: Session, g: Grab, path: str) -> str:
     recycle = settings_store.get(db, "library.recycle_path") or "/data/media/fumora-recycle"
     tag_usenet = (settings_store.get(db, "import.tag") or "on") == "on"
     tag_torrent = (settings_store.get(db, "import.tag_torrents") or "off") == "on"
-    imported, skipped, moved = [], [], []
+    imported, skipped = [], []
     for f in files:
         if len(files) == 1 and len(issues) == 1:
             issue = next(iter(issues.values()))
@@ -265,7 +271,6 @@ def import_grab(db: Session, g: Grab, path: str) -> str:
                 f.unlink(missing_ok=True)  # the download's own copy, now converted
         else:
             placed = _place(f, dest, g.protocol)
-        moved.append(f)
         row = File(path=str(placed), size=placed.stat().st_size)
         issue.files.append(row)
         db.commit()  # the file is in the library now: record it whatever happens next
@@ -274,7 +279,7 @@ def import_grab(db: Session, g: Grab, path: str) -> str:
             db.commit()
         imported.append(f"#{issue.number}")
     if g.protocol == "usenet" and imported:
-        _remove_download_folder(path, moved)
+        _remove_download_folder(path, settings_store.get(db, "sabnzbd.category") or "fumora")
     summary = f"Imported {', '.join(imported) or 'nothing'}" + (
         f"; skipped: {'; '.join(skipped)}" if skipped else ""
     )

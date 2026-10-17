@@ -176,3 +176,20 @@ async def test_qbittorrent_down_is_a_downloader_error():
     async with QbittorrentClient(QBIT, "u", "p") as qb:
         with pytest.raises(DownloaderError):
             await qb.status("fumora-x")
+
+
+@respx.mock
+async def test_job_folder_reported_as_file_is_cleaned_but_category_kept(app, tmp_path):
+    _setup(app, tmp_path)
+    category = tmp_path / "usenet" / "complete" / "fumora"
+    job = category / "Absolute Batman 024 [2026] [Digital]"
+    job.mkdir(parents=True)
+    f = make_cbz(job / "Absolute Batman 016 (2026) (Digital).cbz")
+    (job / "x.nfo").write_text("nfo")
+    _sab_done(f)  # SABnzbd reports the file, not its folder
+    with app.state.session_factory() as db:
+        settings_store.put(db, "import.tag", "off")
+        db.commit()
+    await _grab16(app)
+    await check_downloads(app.state.session_factory)
+    assert not job.exists() and category.is_dir()
