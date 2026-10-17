@@ -1,3 +1,4 @@
+<p class="small {{ 'error' if metron.rejected else 'muted' }}">Metron: {{ metron.per_minute }} requests/minute max{% if metron.sustained_remaining is not none %} · {{ metron.sustained_remaining }} left today{% endif %} · {{ metron.rejected }} rejected (429) since Fumora started{% if metron.last_rejected %}, the last {{ ((now - metron.last_rejected) / 60)|int }} min ago{% endif %}.</p>
 <div class="scroll">
 <table class="log">
   <thead><tr><th>#</th><th>Job</th><th>State</th><th>Progress</th><th>Started (UTC)</th><th>Result</th><th></th></tr></thead>

@@ -57,13 +57,15 @@ async def test_auth_error_stops_job_and_leaves_series_pending(app):
 @respx.mock
 async def test_network_errors_retry_then_raise_metron_error():
     slept = []
+    now = [1000.0]
 
     async def fake_sleep(s):
         slept.append(s)
+        now[0] += s
 
     route = respx.get(f"{BASE_URL}series/5/")
     route.side_effect = [httpx.ReadTimeout("t"), httpx.Response(200, json={"id": 5})]
-    limiter = RateLimiter(min_interval=0, sleep=fake_sleep)
+    limiter = RateLimiter(min_interval=0, sleep=fake_sleep, clock=lambda: now[0])
     async with MetronClient("u", "p", limiter) as client:
         assert (await client.series(5))["id"] == 5
         route.side_effect = httpx.ConnectError("down")

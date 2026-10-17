@@ -41,6 +41,17 @@ def create_app(config: Config | None = None) -> FastAPI:
     # One limiter for the whole process: all Metron calls share its budget.
     metron_limiter = RateLimiter()
 
+    def apply_rate_setting() -> None:
+        with SessionLocal() as db:
+            try:
+                metron_limiter.per_minute = max(
+                    1, min(20, int(settings_store.get(db, "metron.requests_per_minute")))
+                )
+            except (TypeError, ValueError):
+                metron_limiter.per_minute = 20
+
+    apply_rate_setting()
+
     def make_metron_client(username: str, password: str) -> MetronClient:
         return MetronClient(username, password, metron_limiter)
 
@@ -201,6 +212,9 @@ def create_app(config: Config | None = None) -> FastAPI:
     async def settings_submit(request: Request, db: Session = Depends(get_db)):
         form = {k: str(v) for k, v in (await request.form()).items()}
         changed = settings_store.apply_form(db, form)
+        if "metron.requests_per_minute" in changed:
+            db.commit()
+            apply_rate_setting()
         if changed:
             labels = ", ".join(
                 f"{settings_store.SETTINGS_BY_KEY[k].group} {settings_store.SETTINGS_BY_KEY[k].label}"

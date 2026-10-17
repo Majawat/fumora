@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from . import settings_store
 from .importer import _parse_date, apply_metron_series, log, sync_series_issues
 from .jobs import JobContext
-from .metron import MetronAuthError, MetronClient, MetronDailyLimitReached, MetronError
+from .metron import MetronAuthError, MetronClient, MetronError, MetronPause
 from .models import Release, Series
 
 REFRESH = "refresh"
@@ -105,9 +105,9 @@ async def _retrying(ctx: JobContext, call):
     while True:
         try:
             return await call()
-        except MetronDailyLimitReached as exc:
+        except MetronPause as exc:
             resume = datetime.fromtimestamp(exc.reset_at, UTC)
-            ctx.update(message=f"Metron daily limit reached; resuming {resume:%Y-%m-%d %H:%M} UTC")
+            ctx.update(message=f"{exc}; resuming {resume:%Y-%m-%d %H:%M} UTC")
             await asyncio.sleep(max(exc.reset_at - time.time(), 0) + 5)
             ctx.update(message=None)
 

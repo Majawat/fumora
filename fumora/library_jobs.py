@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from . import naming, settings_store
 from .importer import log
 from .jobs import JobContext
-from .metron import MetronAuthError, MetronClient, MetronDailyLimitReached, MetronError
+from .metron import MetronAuthError, MetronClient, MetronError, MetronPause
 from .models import Issue, Series
 from .scanner import scan_folders
 from .tagging import ensure_detail, tag_file
@@ -84,7 +84,7 @@ def make_retag_handler(make_client: Callable[[str, str], MetronClient]):
                         try:
                             await ensure_detail(db, client, issue)
                             break
-                        except MetronDailyLimitReached as exc:
+                        except MetronPause as exc:
                             resume = datetime.fromtimestamp(exc.reset_at, UTC)
                             ctx.update(
                                 message=f"Metron daily limit reached; resuming {resume:%Y-%m-%d %H:%M} UTC"

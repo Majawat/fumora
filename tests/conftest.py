@@ -12,7 +12,9 @@ def config(tmp_path):
 
 @pytest.fixture
 def app(config):
-    return create_app(config)
+    app = create_app(config)
+    app.state.metron_limiter.min_interval = 0  # no pacing delay against mocked Metron
+    return app
 
 
 @pytest.fixture

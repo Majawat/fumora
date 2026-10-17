@@ -19,7 +19,7 @@ from .importer import (
     upsert_mylar,
 )
 from .jobs import JobContext
-from .metron import MetronAuthError, MetronClient, MetronDailyLimitReached, MetronError
+from .metron import MetronAuthError, MetronClient, MetronError, MetronPause
 from .models import Series
 from .mylar import read_mylar, snapshot
 
@@ -31,9 +31,9 @@ async def _with_daily_limit(ctx: JobContext, call):
     while True:
         try:
             return await call()
-        except MetronDailyLimitReached as exc:
+        except MetronPause as exc:
             resume = datetime.fromtimestamp(exc.reset_at, UTC)
-            ctx.update(message=f"Metron daily limit reached; resuming {resume:%Y-%m-%d %H:%M} UTC")
+            ctx.update(message=f"{exc}; resuming {resume:%Y-%m-%d %H:%M} UTC")
             await asyncio.sleep(max(exc.reset_at - time.time(), 0) + 5)
             ctx.update(message=None)
 
