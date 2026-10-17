@@ -26,6 +26,10 @@ CASES = [
     ("Soul Saga (01 - 06) (2000-2003) (Digital) (Ookla-Empire)", "Soul Saga", "range", "1", (1, 6), 2000, "digital", "Ookla-Empire"),
     ("Marvel-Giant-Size.Dark.Phoenix.Saga.2025.No.01.2025.HYBRID.COMIC", "Giant-Size Dark Phoenix Saga", "issue", "1", None, 2025, "digital", None),
     ("Absolute Batman 1.5 (2025) (Digital)", "Absolute Batman", "issue", "1.5", None, 2025, "digital", None),
+    ("Batman v3 016 (2016) (Digital) (Zone-Empire)", "Batman", "issue", "16", None, 2016, "digital", "Zone-Empire"),
+    ("Spider-Man 2099 001 (2019) (Digital)", "Spider-Man 2099", "issue", "1", None, 2019, "digital", None),
+    ("X-Men 92 001 (2016) (Digital)", "X-Men 92", "issue", "1", None, 2016, "digital", None),
+    ("Saga Deluxe Edition 2012-2018", "Saga Deluxe Edition", "unknown", None, None, 2012, "unknown", None),
     ("Absolute Batman 01 (2024) (Webrip) (The Last Kryptonian-DCP) (HD-Upscaled)", "Absolute Batman", "issue", "1", None, 2024, "upscaled", "The Last Kryptonian-DCP"),
 ]  # fmt: skip
 

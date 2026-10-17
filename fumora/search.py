@@ -25,8 +25,9 @@ class Profile:
     min_mb: float = 5
     max_mb: float = 300
     max_collected_mb: float = 2048
+    # Same default as the quality.ignore_words setting.
     ignore_words: list[str] = field(
-        default_factory=lambda: [".exe", ".iso", "pdf-xpost", "ebook", "preview", "sample"]
+        default_factory=lambda: [".exe", ".iso", "pdf-xpost", "preview", "sample"]
     )
     preferred_groups: list[str] = field(default_factory=list)
     blocked_groups: list[str] = field(default_factory=list)
@@ -54,7 +55,7 @@ def load_profile(db: Session) -> Profile:
         p.ignore_words = _list(words)
     p.preferred_groups = _list(settings_store.get(db, "quality.preferred_groups"))
     p.blocked_groups = _list(settings_store.get(db, "quality.blocked_groups"))
-    p.protocols = _list(settings_store.get(db, "quality.protocols")) or p.protocols
+    p.protocols = [x.lower() for x in _list(settings_store.get(db, "quality.protocols"))] or p.protocols
     return p
 
 
@@ -64,6 +65,8 @@ class Candidate:
     parsed: ParsedRelease
     score: int = 0
     rejections: list[str] = field(default_factory=list)
+    # The right series and issue, whatever the profile says about it.
+    identified: bool = False
 
     @property
     def accepted(self) -> bool:
@@ -100,9 +103,16 @@ def evaluate(release: dict, issue: Issue, profile: Profile) -> Candidate:
     years = (series.year_began, issue.cover_date.year if issue.cover_date else None)
 
     if collected:
-        if not (matches_volume(rel, names, issue.number) or matches_issue(rel, names, issue.number, years)):
-            c.rejections.append("not this volume")
+        # A collected edition only takes collected volumes, never single issue #N.
+        c.identified = matches_volume(rel, names, issue.number, strict=False)
+        if not matches_volume(rel, names, issue.number):
+            c.rejections.append(
+                "not this volume"
+                if not c.identified
+                else ("ebook" if rel.ebook else f"language: {rel.language}")
+            )
     elif not matches_issue(rel, names, issue.number, years):
+        c.identified = matches_issue(rel, names, issue.number, years, strict=False)
         if rel.ebook:
             c.rejections.append("ebook, not a comic archive")
         elif rel.language != "en":
@@ -111,6 +121,8 @@ def evaluate(release: dict, issue: Issue, profile: Profile) -> Candidate:
             c.rejections.append("a collected volume, not this issue")
         else:
             c.rejections.append("not this issue")
+    else:
+        c.identified = True
 
     size = c.size_mb
     limit = profile.max_collected_mb if (collected or rel.kind == "range") else profile.max_mb
@@ -151,6 +163,13 @@ def rank(candidates: list[Candidate]) -> list[Candidate]:
 
 
 def queries_for(issue: Issue) -> list[str]:
-    """One search per series name covers all its issues; the issue-specific one is a fallback."""
-    names = [n for n in dict.fromkeys([issue.series.name, issue.series.mylar_name]) if n]
-    return names
+    """One search per series name: indexers return many issues at once."""
+    return [n for n in dict.fromkeys([issue.series.name, issue.series.mylar_name]) if n]
+
+
+def fallback_queries(issue: Issue) -> list[str]:
+    """Issue-specific searches, for when the series-name results (newest first,
+    capped by indexers) don't reach an older issue."""
+    n = issue.number
+    padded = n.zfill(3) if n.isdigit() else n
+    return [f"{name} {padded}" for name in queries_for(issue)]

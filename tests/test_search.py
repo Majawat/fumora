@@ -61,7 +61,7 @@ def test_collected_series_takes_volumes():
     tpb = Series(name="Absolute Batman", year_began=2025, series_type="Trade Paperback")
     ranked = rank([evaluate(r, Issue(series=tpb, number="1"), Profile()) for r in RELEASES])
     accepted = [c.parsed for c in ranked if c.accepted]
-    assert accepted and all(p.kind in ("volume", "issue") and p.number == "1" for p in accepted)
+    assert accepted and all(p.kind == "volume" and p.number == "1" for p in accepted)  # never single #1
 
 
 @respx.mock
@@ -79,3 +79,42 @@ def test_interactive_search_page(logged_in, app):
     assert "Absolute Batman 016 [2026] [Digital] [Shan-Empire]" in html
     assert "apikey" not in html
     assert respx.calls.last.request.headers["X-Api-Key"] == "k"
+
+
+def test_protocol_setting_is_case_insensitive(app):
+    from fumora.search import load_profile
+
+    with app.state.session_factory() as db:
+        settings_store.put(db, "quality.protocols", "Usenet, Torrent")
+        assert load_profile(db).protocols == ["usenet", "torrent"]
+        assert Profile().ignore_words == load_profile(db).ignore_words  # one default
+
+
+def test_close_misses_are_only_the_right_issue():
+    issue = _issue("3", date(2025, 1, 1))
+    issue.series.name = "Saga"
+    issue.series.year_began = 2012
+    french = evaluate({"title": "Saga 003 (2012) FRENCH (Digital)", "size": 40 * 2**20, "protocol": "usenet"},
+                      issue, Profile())  # fmt: skip
+    other = evaluate({"title": "Thorgal.Saga.T05.2025.FRENCH.HYBRiD.COMiC.CBZ", "size": 40 * 2**20,
+                      "protocol": "usenet"}, issue, Profile())  # fmt: skip
+    assert french.identified and not french.accepted
+    assert not other.identified
+
+
+@respx.mock
+def test_search_falls_back_to_issue_query_and_survives_bad_prowlarr(logged_in, app):
+    with app.state.session_factory() as db:
+        settings_store.put(db, "prowlarr.url", "http://prowlarr.test")
+        settings_store.put(db, "prowlarr.api_key", "k")
+        s = Series(name="Absolute Batman", year_began=2024, series_type="Single Issue", locked_fields=[])
+        i = Issue(series=s, number="99", cover_date=date(2030, 1, 1), locked_fields=[])
+        db.add_all([s, i])
+        db.commit()
+        iid = i.id
+    route = respx.get("http://prowlarr.test/api/v1/search").respond(200, json=RELEASES)
+    logged_in.get(f"/issues/{iid}/search")
+    queries = [c.request.url.params["query"] for c in route.calls]
+    assert queries == ["Absolute Batman", "Absolute Batman 099"]
+    route.respond(200, text="<html>login</html>")
+    assert "wasn&#39;t JSON" in logged_in.get(f"/issues/{iid}/search").text  # shown, not a 500

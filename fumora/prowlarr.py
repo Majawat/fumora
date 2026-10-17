@@ -38,7 +38,19 @@ class ProwlarrClient:
             raise ProwlarrError("Prowlarr rejected the API key")
         if resp.status_code >= 400:
             raise ProwlarrError(f"Prowlarr search returned HTTP {resp.status_code}")
-        return resp.json()
+        return self._json(resp)
+
+    @staticmethod
+    def _json(resp: httpx.Response):
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            raise ProwlarrError(
+                "Prowlarr's answer wasn't JSON: is the URL right (not a login page)?"
+            ) from exc
+        if not isinstance(data, list):
+            raise ProwlarrError("Unexpected answer from Prowlarr")
+        return data
 
     async def check(self) -> int:
         """Number of enabled indexers; raises ProwlarrError if Prowlarr isn't usable."""
@@ -48,5 +60,6 @@ class ProwlarrClient:
             raise ProwlarrError(f"Could not reach Prowlarr ({type(exc).__name__})") from exc
         if resp.status_code in (401, 403):
             raise ProwlarrError("Prowlarr rejected the API key")
-        resp.raise_for_status()
-        return sum(1 for i in resp.json() if i.get("enable"))
+        if resp.status_code >= 400:
+            raise ProwlarrError(f"Prowlarr returned HTTP {resp.status_code}")
+        return sum(1 for i in self._json(resp) if i.get("enable"))

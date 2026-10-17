@@ -16,6 +16,7 @@ Variant-cover markers don't make a separate issue.
 import html
 import re
 from dataclasses import dataclass, field
+from datetime import date
 
 from .numbers import normalize_number
 
@@ -50,6 +51,7 @@ class ParsedRelease:
     number: str | None = None  # issue number or volume number
     range_start: int | None = None
     range_end: int | None = None
+    volume: str | None = None  # "v3" in "Batman v3 016"
     year: int | None = None
     source: str = "unknown"  # digital, upscaled, scan, unknown
     group: str | None = None
@@ -62,6 +64,27 @@ class ParsedRelease:
     @property
     def series_key(self) -> str:
         return series_key(self.series)
+
+
+def _plausible_year(text: str) -> bool:
+    """A publication year, not a number like the 2099 in 'Spider-Man 2099'."""
+    try:
+        n = int(text)
+    except ValueError:
+        return False
+    return 1930 <= n <= date.today().year + 1
+
+
+def _pick_issue(matches: list[re.Match]) -> re.Match:
+    """Of several numbers in a title, which is the issue? '#'/'No' wins, then a
+    zero-padded one ('X-Men 92 001' -> 001), then the last."""
+    for m in matches:
+        if re.match(r"(#|no\.?|issue)", m.group(0).strip(), re.I):
+            return m
+    padded = [m for m in matches if re.fullmatch(r"0\d{1,3}", m.group(1))]
+    if padded:
+        return padded[0]
+    return matches[-1] if len(matches) > 1 else matches[0]
 
 
 def series_key(name: str | None) -> str:
@@ -157,24 +180,40 @@ def parse_release(title: str) -> ParsedRelease:
         return body[: match.start()]
 
     head = None
+    rm = _RANGE.search(body)
     if r.kind == "range":  # found in a bracket tag: the series is everything before the tags
         head = body
-    elif (m := _RANGE.search(body)) and int(m.group(1)) < int(m.group(2)):
-        head = take(m, "range")
-        r.range_start, r.range_end = int(m.group(1)), int(m.group(2))
-        r.number = normalize_number(m.group(1))
-    elif m := _VOLUME.search(body):
-        head = take(m, "volume")
-        r.number = normalize_number(m.group(1))
+    elif (
+        rm
+        and int(rm.group(1)) < int(rm.group(2))
+        and not (_plausible_year(rm.group(1)) and _plausible_year(rm.group(2)))
+    ):
+        head = take(rm, "range")
+        r.range_start, r.range_end = int(rm.group(1)), int(rm.group(2))
+        r.number = normalize_number(rm.group(1))
     else:
-        for m in _ISSUE.finditer(body):
-            n = m.group(1)
-            if _YEAR.match(n) and len(n) == 4:
-                r.year = r.year or int(n)
-                continue
+        vm = _VOLUME.search(body)
+        issues = [
+            m for m in _ISSUE.finditer(body) if not (len(m.group(1)) == 4 and _plausible_year(m.group(1)))
+        ]
+        if vm is not None:
+            # "Batman v3 016": a volume marker followed by an issue number is an
+            # issue of that volume (Mylar/Empire style), not a collected volume.
+            after = [m for m in issues if m.start() >= vm.end()]
+            if after:
+                head = take(after[0], "issue")
+                r.number = normalize_number(after[0].group(1))
+                r.volume = vm.group(1)
+            else:
+                head = take(vm, "volume")
+                r.number = normalize_number(vm.group(1))
+        elif issues:
+            m = _pick_issue(issues)
             head = take(m, "issue")
-            r.number = normalize_number(n)
-            break
+            r.number = normalize_number(m.group(1))
+        for m in _ISSUE.finditer(body):  # a plausible year in the body
+            if len(m.group(1)) == 4 and _plausible_year(m.group(1)) and r.year is None:
+                r.year = int(m.group(1))
     if r.year is None:
         y = re.search(r"(?<!\d)(19[5-9]\d|20[0-4]\d)(?!\d)", body)
         if y:
@@ -182,7 +221,12 @@ def parse_release(title: str) -> ParsedRelease:
     series = head if head is not None else body
     series = re.sub(r"\s+-\s*$|[-:#,]+\s*$", "", series.strip())
     series = re.sub(r"\s+", " ", series).strip(" -_.")
-    if ym := re.search(r"\s((?:19|20)\d{2})$", series):  # "Dark Phoenix Saga 2025" -> year
+    if vm2 := re.search(r"\s+v(\d{1,4})$", series, re.I):  # "Batman v3", "Batman v2016"
+        r.volume = r.volume or vm2.group(1)
+        series = series[: vm2.start()].strip()
+    series = re.sub(r"\s+(?:19|20)\d{2}\s*-\s*(?:19|20)\d{2}$", "", series)  # trailing year span
+    if (ym := re.search(r"\s((?:19|20)\d{2})$", series)) and _plausible_year(ym.group(1)):
+        # "Dark Phoenix Saga 2025" -> year (but "Spider-Man 2099" keeps its number)
         r.year = r.year or int(ym.group(1))
         series = series[: ym.start()].strip()
     if r.group is None and " " not in raw and (dg := re.search(r"[.\s]([A-Za-z0-9]+-(?:Empire|DCP))$", raw)):
@@ -192,12 +236,17 @@ def parse_release(title: str) -> ParsedRelease:
 
 
 def matches_issue(
-    rel: ParsedRelease, series_names: list[str], number: str, years: tuple[int | None, ...]
+    rel: ParsedRelease,
+    series_names: list[str],
+    number: str,
+    years: tuple[int | None, ...],
+    strict: bool = True,
 ) -> bool:
     """Does this release contain issue `number` of a series called one of
     `series_names`? Years (series start, issue cover) guard against a same-name
-    series from another decade."""
-    if rel.ebook or rel.language != "en":
+    series from another decade. strict=False ignores format and language (to
+    tell "right issue, wrong format" from "another series")."""
+    if strict and (rel.ebook or rel.language != "en"):
         return False
     if rel.series_key not in {series_key(n) for n in series_names if n}:
         return False
@@ -220,9 +269,9 @@ def matches_issue(
     return True
 
 
-def matches_volume(rel: ParsedRelease, series_names: list[str], number: str) -> bool:
+def matches_volume(rel: ParsedRelease, series_names: list[str], number: str, strict: bool = True) -> bool:
     """A collected volume ("Vol. 3", "TPB 07") for a collected-edition series."""
-    if rel.ebook or rel.language != "en" or rel.kind != "volume":
+    if rel.kind != "volume" or (strict and (rel.ebook or rel.language != "en")):
         return False
     names = {series_key(n) for n in series_names if n}
     names |= {series_key(re.sub(r"\s+(tpb|hc|omnibus)$", "", n, flags=re.I)) for n in series_names if n}
