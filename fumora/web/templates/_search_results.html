@@ -1,0 +1,29 @@
+{% if error %}<p class="error">{{ error }}</p>{% else %}
+<p class="muted small">Searched Prowlarr for {% for q in queries %}"{{ q }}"{% if not loop.last %} and {% endif %}{% endfor %}. Best first. Downloading arrives in the next part of M4.</p>
+{% if accepted %}
+<div class="scroll">
+<table class="log results">
+  <thead><tr><th>Release</th><th>Source</th><th>Size</th><th>Age</th><th>Score</th></tr></thead>
+  <tbody>
+  {% for c in accepted %}
+  <tr class="{{ 'best' if loop.first else '' }}">
+    <td>{{ c.parsed.title }}<small class="muted why">{{ c.release.indexer }} · {{ c.protocol }}{% if c.protocol == "torrent" %} · {{ c.release.seeders }} seeders{% endif %}{% if c.parsed.kind == "range" %} · pack {{ c.parsed.range_start }}–{{ c.parsed.range_end }}{% endif %}</small></td>
+    <td>{{ c.parsed.source }}{% if c.parsed.group %}<small class="muted why">{{ c.parsed.group }}</small>{% endif %}</td>
+    <td>{{ "%.0f"|format(c.size_mb) }} MB</td>
+    <td>{{ c.age_days if c.age_days is not none else "" }}{% if c.age_days is not none %} d{% endif %}</td>
+    <td>{{ c.score }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">No acceptable release found.</p>{% endif %}
+{% if close %}
+<details><summary class="small">{{ close|length }} matching releases rejected by your profile</summary>
+<table class="log small">
+  {% for c in close %}<tr><td>{{ c.parsed.title }}</td><td class="error">{{ c.rejections|join(", ") }}</td></tr>{% endfor %}
+</table>
+</details>
+{% endif %}
+{% if hidden %}<p class="muted small">{{ hidden }} other results were for other issues or series.</p>{% endif %}
+{% endif %}

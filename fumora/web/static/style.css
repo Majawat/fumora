@@ -87,3 +87,6 @@ ul.plain li { padding: .15rem 0; border-bottom: 1px solid var(--line); }
 a.button.small { padding: .2rem .6rem; font-size: .85rem; background: var(--accent); color: var(--accent-fg); }
 select { max-width: 100%; }
 form.row + form.row { margin-top: .5rem; }
+.htmx-indicator { display: none; }
+.htmx-request .htmx-indicator, .htmx-request.htmx-indicator { display: inline; }
+table.results tr.best td:first-child { border-left: 3px solid var(--ok); }
