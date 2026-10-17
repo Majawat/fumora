@@ -99,6 +99,8 @@ class Series(Base):
 
     # Ours
     monitored: Mapped[bool] = mapped_column(Boolean, default=False)
+    # New issues found by a Metron refresh start monitored (Sonarr's "monitor new items").
+    monitor_new: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
     path: Mapped[str | None] = mapped_column(String(1024))
     # Metron age-rating vocabulary; overrides the rating calculated from issues.
     age_rating_override: Mapped[str | None] = mapped_column(String(30))
@@ -165,7 +167,8 @@ class Issue(Base):
     price: Mapped[float | None]
     modified: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    # Ours. status: Wanted, Downloaded, Skipped, Ignored
+    # Mylar's old status (Wanted, Downloaded, Skipped, Ignored), for reference only.
+    # Whether an issue is wanted is derived: see monitoring.py.
     status: Mapped[str] = mapped_column(String(20), default="Skipped")
     monitored: Mapped[bool] = mapped_column(Boolean, default=False)
     rating_override: Mapped[str | None] = mapped_column(String(30))

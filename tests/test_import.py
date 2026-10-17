@@ -119,10 +119,11 @@ async def test_full_import_job(app, tmp_path, monkeypatch):
         issues = {i.number: i for i in pd.issues}
         assert issues["1"].metron_id == 186450 and issues["1"].match_status == "matched"
         assert issues["99"].match_status == "unmatched"
-        # Only Metron has #3; it is already out and the series is monitored.
-        assert issues["3"].match_status == "new" and issues["3"].status == "Wanted"
+        # Only Metron has #3, released before the series was added: an old gap,
+        # so it starts unmonitored (Missing), not Wanted.
+        assert issues["3"].match_status == "new" and not issues["3"].monitored
         # Only Metron has #10, and it is not released yet.
-        assert issues["10"].match_status == "new" and issues["10"].status == "Skipped"
+        assert issues["10"].match_status == "new" and issues["10"].monitored  # future issue
         assert (
             db.scalar(select(File).where(File.path == f"{LIB}/Private Dance 001 (2023).cbz")).issue_id
             == issues["1"].id

@@ -33,11 +33,13 @@ MATCH_LABELS = {
 
 
 def _series_rows(db: Session, where=None, name_like: str | None = None, having_unmatched: bool = False):
-    have = func.sum(case((Issue.status == "Downloaded", 1), else_=0))
-    unmatched = func.sum(case((Issue.match_status == "unmatched", 1), else_=0))
+    total = func.count(func.distinct(Issue.id))
+    have = func.count(func.distinct(File.issue_id))
+    unmatched = func.count(func.distinct(case((Issue.match_status == "unmatched", Issue.id))))
     q = (
-        select(Series, func.count(Issue.id), have, unmatched)
+        select(Series, total, have, unmatched)
         .outerjoin(Issue, Issue.series_id == Series.id)
+        .outerjoin(File, File.issue_id == Issue.id)
         .group_by(Series.id)
         .order_by(func.lower(func.coalesce(Series.sort_name, Series.name)), Series.year_began)
     )
@@ -48,8 +50,7 @@ def _series_rows(db: Session, where=None, name_like: str | None = None, having_u
     if having_unmatched:
         q = q.having(unmatched > 0)
     return [
-        {"series": s, "total": total, "have": have or 0, "unmatched": unmatched or 0}
-        for s, total, have, unmatched in db.execute(q).all()
+        {"series": s, "total": t, "have": h or 0, "unmatched": u or 0} for s, t, h, u in db.execute(q).all()
     ]
 
 
