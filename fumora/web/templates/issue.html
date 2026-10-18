@@ -12,7 +12,10 @@
 </dl>
 <section class="card">
   <h2>Search</h2>
-  <button class="secondary" hx-get="/issues/{{ i.id }}/search" hx-target="#search-results" hx-indicator="#search-wait">Search indexers</button>
+  <div class="row">
+    <form method="post" action="/issues/{{ i.id }}/auto-search"><button>Search and grab the best</button></form>
+    <button class="secondary" hx-get="/issues/{{ i.id }}/search" hx-target="#search-results" hx-indicator="#search-wait">Show all results</button>
+  </div>
   <span id="search-wait" class="htmx-indicator muted small">Searching all indexers… this can take a minute.</span>
   <div id="search-results"></div>
 </section>

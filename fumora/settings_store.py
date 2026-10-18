@@ -136,6 +136,28 @@ SETTINGS += [
                help="Remove one to never use it. Source ranking is fixed: digital, HD-Upscaled, then scans."),
 ]  # fmt: skip
 
+SETTINGS += [
+    SettingDef("sabnzbd.url", "URL", "Usenet (SABnzbd)", help="e.g. http://192.168.9.10:8085"),
+    SettingDef("sabnzbd.api_key", "API key", "Usenet (SABnzbd)", secret=True),
+    SettingDef("sabnzbd.category", "Category", "Usenet (SABnzbd)", default="fumora",
+               help="A category of Fumora's own, so Mylar never picks up its downloads."),
+    SettingDef("qbittorrent.url", "URL", "Torrents (qBittorrent)", help="e.g. http://192.168.9.10:8100"),
+    SettingDef("qbittorrent.username", "Username", "Torrents (qBittorrent)"),
+    SettingDef("qbittorrent.password", "Password", "Torrents (qBittorrent)", secret=True),
+    SettingDef("qbittorrent.category", "Category", "Torrents (qBittorrent)", default="fumora",
+               help="Torrents are hardlinked into the library and keep seeding."),
+    SettingDef("search.auto", "Search Wanted automatically", "Search", default="off",
+               choices=(("off", "off (search by hand)"), ("on", "on"))),
+    SettingDef("search.interval_hours", "Every (hours)", "Search", default="6"),
+    SettingDef("search.delay_hours", "Wait after release (hours)", "Search", default="0",
+               help="Give a digital release time to appear before settling for something else."),
+    SettingDef("import.tag", "Tag usenet imports", "Search", default="on",
+               choices=(("on", "on (confirmed series only)"), ("off", "off"))),
+    SettingDef("import.tag_torrents", "Tag torrent imports", "Search", default="off",
+               choices=(("off", "off (keeps the hardlink: no extra disk space while seeding)"),
+                        ("on", "on (rewrites the file: a second copy while it seeds)"))),
+]  # fmt: skip
+
 SETTINGS_BY_KEY = {s.key: s for s in SETTINGS}
 
 

@@ -69,7 +69,10 @@ def read_member(path: str | Path, name: str) -> bytes | None:
     return None
 
 
-def _recycle(path: Path, recycle_dir: Path) -> Path:
+def _recycle(path: Path, recycle_dir: Path | None) -> Path | None:
+    if recycle_dir is None:
+        path.unlink()
+        return None
     target_dir = recycle_dir / date.today().isoformat()
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / path.name
@@ -84,8 +87,11 @@ def _recycle(path: Path, recycle_dir: Path) -> Path:
     return target
 
 
-def convert_to_cbz(path: str | Path, recycle_dir: str | Path) -> Path:
-    """Convert one file to .cbz next to it; returns the new path."""
+def convert_to_cbz(path: str | Path, recycle_dir: str | Path | None) -> Path:
+    """Convert one file to .cbz next to it; returns the new path.
+
+    The original goes to `recycle_dir`; pass None only for a file Fumora itself
+    just placed (an imported download), which is then simply removed."""
     path = Path(path)
     target = path.with_suffix(".cbz")
     if target != path and target.exists():
@@ -130,11 +136,11 @@ def convert_to_cbz(path: str | Path, recycle_dir: str | Path) -> Path:
         if target == path:
             # A ".cbz" that is really a RAR: move the original away first, so it
             # is never overwritten.
-            _recycle(path, Path(recycle_dir))
+            _recycle(path, Path(recycle_dir) if recycle_dir else None)
             os.replace(tmp_zip, target)
         else:
             os.replace(tmp_zip, target)
-            _recycle(path, Path(recycle_dir))
+            _recycle(path, Path(recycle_dir) if recycle_dir else None)
         return target
     except OSError as exc:
         raise ArchiveError(f"Cannot convert {path.name}: {exc}") from exc

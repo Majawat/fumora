@@ -67,6 +67,7 @@ class Candidate:
     rejections: list[str] = field(default_factory=list)
     # The right series and issue, whatever the profile says about it.
     identified: bool = False
+    blocklisted: bool = False
 
     @property
     def accepted(self) -> bool:

@@ -4,7 +4,7 @@ Fumora: Metron-first comic manager (Mylar3 replacement). Python 3.12+,
 FastAPI, SQLAlchemy 2 + Alembic on SQLite, Jinja2 + htmx (vendored in
 `fumora/web/static`). One container, port 8792.
 
-Design truth: the Claude Doc linked in `docs/DESIGN.md`. Read it first.
+Design truth: the Claude Doc linked in `docs/DESIGN.md`. Current state and next steps: `docs/HANDOFF.md`. Read both first.
 
 ## Commands
 

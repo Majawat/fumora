@@ -12,6 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import __version__, monitoring, settings_store
 from .auth import hash_password, load_or_create_secret, verify_password
+from .auto_search import SEARCH, make_search_handler
 from .config import Config, load_config
 from .db import make_engine, make_session_factory, upgrade_db
 from .import_job import KIND as MYLAR_IMPORT
@@ -21,7 +22,7 @@ from .library_jobs import ORGANIZE, RETAG, SCAN, make_organize_handler, make_ret
 from .metron import MetronAuthError, MetronClient, MetronError, RateLimiter
 from .models import Event, Issue, Series, User
 from .refresh import REFRESH, make_refresh_handler
-from .scheduler import run_scheduler
+from .scheduler import run_download_monitor, run_scheduler
 from .web.catalog_routes import register_catalog_routes
 from .web.library import register_library_routes
 from .web.library_admin import register_admin_routes
@@ -62,14 +63,19 @@ def create_app(config: Config | None = None) -> FastAPI:
     jobs.register(RETAG, make_retag_handler(make_metron_client))
     jobs.register(ORGANIZE, make_organize_handler())
     jobs.register(REFRESH, make_refresh_handler(make_metron_client))
+    jobs.register(SEARCH, make_search_handler())
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         jobs.resume_all()
-        scheduler = asyncio.create_task(run_scheduler(SessionLocal, jobs)) if config.scheduler else None
+        tasks = []
+        if config.scheduler:
+            tasks.append(asyncio.create_task(run_scheduler(SessionLocal, jobs)))
+        if config.download_monitor:
+            tasks.append(asyncio.create_task(run_download_monitor(SessionLocal)))
         yield
-        if scheduler:
-            scheduler.cancel()
+        for t in tasks:
+            t.cancel()
         await jobs.shutdown()
         engine.dispose()
 

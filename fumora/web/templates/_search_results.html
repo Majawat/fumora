@@ -1,9 +1,9 @@
 {% if error %}<p class="error">{{ error }}</p>{% else %}
-<p class="muted small">Searched Prowlarr for {% for q in queries %}"{{ q }}"{% if not loop.last %} and {% endif %}{% endfor %}. Best first. Downloading arrives in the next part of M4.</p>
+<p class="muted small">Searched Prowlarr for {% for q in queries %}"{{ q }}"{% if not loop.last %} and {% endif %}{% endfor %}. Best first.{% if busy %} A download for this issue is already under way (<a href="/queue">Queue</a>).{% endif %}</p>
 {% if accepted %}
 <div class="scroll">
 <table class="log results">
-  <thead><tr><th>Release</th><th>Source</th><th>Size</th><th>Age</th><th>Score</th></tr></thead>
+  <thead><tr><th>Release</th><th>Source</th><th>Size</th><th>Age</th><th>Score</th><th></th></tr></thead>
   <tbody>
   {% for c in accepted %}
   <tr class="{{ 'best' if loop.first else '' }}">
@@ -12,6 +12,7 @@
     <td>{{ "%.0f"|format(c.size_mb) }} MB</td>
     <td>{{ c.age_days if c.age_days is not none else "" }}{% if c.age_days is not none %} d{% endif %}</td>
     <td>{{ c.score }}</td>
+    <td>{% if c.blocklisted %}<span class="muted small">blocklisted</span>{% else %}<form method="post" action="/issues/{{ i.id }}/grab"><input type="hidden" name="token" value="{{ token }}"><input type="hidden" name="index" value="{{ loop.index0 }}"><button class="small">Grab</button></form>{% endif %}</td>
   </tr>
   {% endfor %}
   </tbody>

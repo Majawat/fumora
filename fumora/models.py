@@ -215,15 +215,44 @@ class File(Base):
 
 
 class Grab(Base):
+    """A release sent to a download client, followed until it is imported."""
+
     __tablename__ = "grab"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     issue_id: Mapped[int | None] = mapped_column(ForeignKey("issue.id", ondelete="SET NULL"), index=True)
+    # Every issue the release should contain (a pack covers several).
+    issue_ids: Mapped[list] = mapped_column(JSON, default=list)
+    series_id: Mapped[int | None] = mapped_column(ForeignKey("series.id", ondelete="SET NULL"), index=True)
     indexer: Mapped[str] = mapped_column(String(100))
     release_title: Mapped[str] = mapped_column(String(500))
+    guid: Mapped[str | None] = mapped_column(String(1000), index=True)
+    # Prowlarr's link carries its API key: never rendered or logged.
+    download_url: Mapped[str | None] = mapped_column(Text)
+    protocol: Mapped[str] = mapped_column(String(10), default="usenet")
+    size: Mapped[int | None]
+    score: Mapped[int | None]
+    source: Mapped[str | None] = mapped_column(String(20))
     client: Mapped[str] = mapped_column(String(50))
     client_job_id: Mapped[str | None] = mapped_column(String(100))
-    state: Mapped[str] = mapped_column(String(20), default="queued")
+    # queued, downloading, importing, imported, failed, import_failed, removed
+    state: Mapped[str] = mapped_column(String(20), default="queued", index=True)
+    progress: Mapped[float] = mapped_column(default=0.0)
+    message: Mapped[str | None] = mapped_column(Text)
+    path: Mapped[str | None] = mapped_column(String(1024))
+    created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Blocklist(Base):
+    """Releases never to grab again (failed downloads, bad imports, or by hand)."""
+
+    __tablename__ = "blocklist"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    guid: Mapped[str | None] = mapped_column(String(1000), index=True)
+    title: Mapped[str] = mapped_column(String(500))
+    reason: Mapped[str | None] = mapped_column(String(500))
     created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
