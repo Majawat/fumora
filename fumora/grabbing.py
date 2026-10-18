@@ -5,7 +5,7 @@ Import rules (TRaSH layout: downloads and library share one /data mount):
 - torrent downloads are hardlinked, so they keep seeding (private trackers);
 - never a silent copy across mounts: if a rename/hardlink isn't possible, the
   import fails with a message saying the mounts need fixing;
-- CBR/CB7/CBT are converted into a new CBZ in the series folder; the download
+- CBR/CB7/CBT/PDF are converted into a new CBZ in the series folder; the download
   itself is left untouched until the CBZ is safely in place;
 - the file is named by the naming template and, for usenet imports, tagged
   (confirmed series only). Tagging a torrent import would rewrite the file and
@@ -39,7 +39,7 @@ from .tagging import tag_file
 
 logger = logging.getLogger("fumora.grabbing")
 ACTIVE = ("queued", "downloading", "importing")
-IMPORT_EXTS = COMIC_EXTS - {".pdf"}
+IMPORT_EXTS = COMIC_EXTS  # PDFs included: converted to CBZ on import
 # Folder names a cleanup must never remove, whatever the client reports.
 PROTECTED_DIRS = {"complete", "completed", "incomplete", "downloads", "usenet", "torrents", "data", "fumora"}
 

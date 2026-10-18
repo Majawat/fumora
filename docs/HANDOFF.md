@@ -27,6 +27,7 @@ Jinja2 + htmx. Image: `ghcr.io/majawat/fumora:edge` (built from `main`).
 | Metron rate limiting (after Metron's warning) | merged | #22 |
 | M4 part 1: release parser, Prowlarr search, decisions | merged | #23 |
 | **M4 part 2: grab, download monitor, import** | **PR open, awaiting owner merge** | #25 |
+| PDF → CBZ (extract page images or render at 300 dpi) | PR open, stacked on #25 | #26 |
 | M5 GetComics, Anna's Archive (via Shelfmark), TPB links, Metron gaps page, GCD ratings | not started | — |
 | M6 side-by-side week with Mylar, cut over | not started | — |
 
@@ -41,6 +42,11 @@ Jinja2 + htmx. Image: `ghcr.io/majawat/fumora:edge` (built from `main`).
   `/mnt/user/data/usenet` read-write and its *Absolute Batman* series folder
   is `/data/usenet/fumora-test-library/...` so download and library share a
   mount. Production mounts `/data` once and is unaffected.
+- Private Dance #1 came from the owner as a PDF (2026-10-18): converted to
+  `~/claude/Comic-Manager/ready/Private Dance 001 (2023).cbz` (36 pages,
+  1991x3060) and placed in the **test** library only; copying it into the
+  production Comics folder was blocked by auto mode and needs the owner (SMB
+  copy) or an explicit go-ahead.
 - Private Dance #1–4 have no single-issue releases; they only exist in
   `Private.Dance.Vol.01-Season.One...TPB` (relevant to #5).
 - Imports get basic tags only; full Metron tags at import is #24.
