@@ -20,8 +20,9 @@ from datetime import date
 
 from .numbers import normalize_number
 
-EBOOK_FORMATS = {"azw3", "azw", "epub", "mobi", "kfx", "pdf", "txt", "fb2"}
-COMIC_FORMATS = {"cbz", "cbr", "cb7", "cbt", "zip", "rar", "webp"}
+EBOOK_FORMATS = {"azw3", "azw", "epub", "mobi", "kfx", "txt", "fb2"}
+# PDF counts as a comic format: Fumora converts PDFs to CBZ on import.
+COMIC_FORMATS = {"cbz", "cbr", "cb7", "cbt", "zip", "rar", "webp", "pdf"}
 LANGUAGES = {
     "french": "fr", "german": "de", "spanish": "es", "italian": "it", "dutch": "nl", "polish": "pl",
     "portuguese": "pt", "russian": "ru", "japanese": "ja", "korean": "ko", "chinese": "zh",

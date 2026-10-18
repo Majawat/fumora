@@ -8,9 +8,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PGID=100 \
     UMASK=0002
 
-# bsdtar (libarchive) unpacks CBR/CB7/CBT for conversion to CBZ.
+# bsdtar (libarchive) unpacks CBR/CB7/CBT and poppler reads PDFs, for conversion to CBZ.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libarchive-tools \
+    && apt-get install -y --no-install-recommends libarchive-tools poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
