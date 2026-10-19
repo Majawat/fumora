@@ -8,12 +8,14 @@ goes through one RateLimiter, which:
 - spaces requests evenly: at most `per_minute` a minute (default 20);
 - stops when the account's burst window is nearly used up (the headers are
   account-wide, so this also covers other apps on the same account);
-- after a 429 blocks *every* request for Retry-After seconds;
+- after a 429 blocks *every* request for Retry-After seconds, plus a little
+  random jitter (Metron asks that installs don't all come back at once);
 - refuses with MetronDailyLimitReached when the daily quota is spent.
 """
 
 import asyncio
 import logging
+import random
 import time
 from collections.abc import AsyncIterator, Callable
 from typing import Any
@@ -68,8 +70,11 @@ class RateLimiter:
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], Any] = asyncio.sleep,
         min_interval: float | None = None,
+        jitter: float = 0.2,
     ):
         self.per_minute = per_minute
+        # Waits after errors grow by up to this fraction, at random (0 in tests).
+        self.jitter = jitter
         self.headroom = headroom
         # Tests pass min_interval=0 to skip the pacing delay.
         self.min_interval = min_interval
@@ -82,6 +87,7 @@ class RateLimiter:
         self.burst_remaining: int | None = None
         self.burst_reset: float | None = None
         self.sustained_remaining: int | None = None
+        self.sustained_limit: int | None = None
         self.sustained_reset: float | None = None
         self.rejected = 0  # 429s seen since start
         self.last_rejected: float | None = None
@@ -124,7 +130,8 @@ class RateLimiter:
                 self.burst_remaining -= 1  # until the response tells us the real number
 
     def block(self, seconds: float) -> None:
-        """Hold every request for `seconds` (after a 429, an outage, ...)."""
+        """Hold every request for `seconds` (after a 429, an outage, ...), with jitter."""
+        seconds *= 1 + random.uniform(0, self.jitter)
         self.blocked_until = max(self.blocked_until, self._clock() + seconds)
 
     def on_rate_limited(self, retry_after: float | None) -> None:
@@ -147,10 +154,17 @@ class RateLimiter:
             self.burst_remaining = v
         if (v := num("x-ratelimit-burst-reset")) is not None:
             self.burst_reset = float(v)
+        if (v := num("x-ratelimit-sustained-limit")) is not None:
+            self.sustained_limit = v  # the account's tier (5,000 standard; more for supporters)
         if (v := num("x-ratelimit-sustained-remaining")) is not None:
             self.sustained_remaining = v
         if (v := num("x-ratelimit-sustained-reset")) is not None:
             self.sustained_reset = float(v)
+
+
+def _open(make_client, user, password, token):
+    """Jobs get a client factory; pass the token only when there is one."""
+    return make_client(user, password, token=token) if token else make_client(user, password)
 
 
 class MetronClient:
@@ -161,13 +175,19 @@ class MetronClient:
         limiter: RateLimiter,
         transport: httpx.AsyncBaseTransport | None = None,
         max_retries: int = 3,
+        token: str | None = None,
     ):
+        """An API token (Authorization: Bearer) is used when given; Metron is
+        phasing out username/password (Basic) for apps."""
         self._limiter = limiter
         self._max_retries = max_retries
+        headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
         self._http = httpx.AsyncClient(
             base_url=BASE_URL,
-            auth=(username, password),
-            headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+            auth=None if token else (username, password),
+            headers=headers,
             timeout=30.0,
             transport=transport,
         )

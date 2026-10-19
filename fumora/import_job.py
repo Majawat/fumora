@@ -19,7 +19,7 @@ from .importer import (
     upsert_mylar,
 )
 from .jobs import JobContext
-from .metron import MetronAuthError, MetronClient, MetronError, MetronPause
+from .metron import MetronAuthError, MetronClient, MetronError, MetronPause, _open
 from .models import Series
 from .mylar import read_mylar, snapshot
 
@@ -43,10 +43,9 @@ def make_handler(config_dir: Path, make_client: Callable[[str, str], MetronClien
         sf = ctx.session_factory
         with sf() as db:
             mylar_db = Path(settings_store.get(db, "mylar.db_path") or "")
-            user = settings_store.get(db, "metron.username")
-            password = settings_store.get(db, "metron.password")
-        if not user or not password:
-            raise RuntimeError("Metron username and password are not set")
+            user, password, token = settings_store.metron_login(db)
+        if not settings_store.metron_usable(user, password, token):
+            raise RuntimeError("No Metron API token (or username and password) is set")
 
         # Phase 1: read Mylar (skipped for jobs that only apply accepted suggestions)
         params = ctx.params()
@@ -69,7 +68,7 @@ def make_handler(config_dir: Path, make_client: Callable[[str, str], MetronClien
                 db.commit()
             ctx.update(params={**ctx.params(), "read_done": True}, message=None)
 
-        async with make_client(user, password) as client:
+        async with _open(make_client, user, password, token) as client:
             # Phases 2 and 3 repeat until nothing is left, so a suggestion
             # accepted while this job runs is still applied by it.
             while True:

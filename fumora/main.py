@@ -15,6 +15,9 @@ from .auth import hash_password, load_or_create_secret, verify_password
 from .auto_search import SEARCH, make_search_handler
 from .config import Config, load_config
 from .db import make_engine, make_session_factory, upgrade_db
+from .ddl import DirectClient
+from .downloaders import DownloaderError
+from .getcomics import GetComicsClient, GetComicsError
 from .import_job import KIND as MYLAR_IMPORT
 from .import_job import make_handler as make_import_handler
 from .jobs import JobRunner
@@ -22,7 +25,8 @@ from .library_jobs import ORGANIZE, RETAG, SCAN, make_organize_handler, make_ret
 from .metron import MetronAuthError, MetronClient, MetronError, RateLimiter
 from .models import Event, Issue, Series, User
 from .refresh import REFRESH, make_refresh_handler
-from .scheduler import run_download_monitor, run_scheduler
+from .scheduler import ensure_refresh_time, run_download_monitor, run_scheduler
+from .shelfmark import ShelfmarkClient, ShelfmarkError
 from .web.catalog_routes import register_catalog_routes
 from .web.library import register_library_routes
 from .web.library_admin import register_admin_routes
@@ -54,8 +58,10 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     apply_rate_setting()
 
-    def make_metron_client(username: str, password: str) -> MetronClient:
-        return MetronClient(username, password, metron_limiter)
+    def make_metron_client(
+        username: str | None, password: str | None, token: str | None = None
+    ) -> MetronClient:
+        return MetronClient(username or "", password or "", metron_limiter, token=token)
 
     jobs = JobRunner(SessionLocal)
     jobs.register(MYLAR_IMPORT, make_import_handler(config.config_dir, make_metron_client))
@@ -67,12 +73,14 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        with SessionLocal() as db:
+            ensure_refresh_time(db)
         jobs.resume_all()
         tasks = []
         if config.scheduler:
             tasks.append(asyncio.create_task(run_scheduler(SessionLocal, jobs)))
         if config.download_monitor:
-            tasks.append(asyncio.create_task(run_download_monitor(SessionLocal)))
+            tasks.append(asyncio.create_task(run_download_monitor(SessionLocal, jobs)))
         yield
         for t in tasks:
             t.cancel()
@@ -189,9 +197,7 @@ def create_app(config: Config | None = None) -> FastAPI:
             "wanted": monitoring.counts(db)["wanted"],
         }
         events = db.scalars(select(Event).order_by(Event.ts.desc()).limit(20)).all()
-        metron_ready = settings_store.is_set(db, "metron.username") and settings_store.is_set(
-            db, "metron.password"
-        )
+        metron_ready = settings_store.metron_ready(db)
         return templates.TemplateResponse(
             request,
             "dashboard.html",
@@ -233,25 +239,57 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     @app.post("/settings/test/metron", response_class=HTMLResponse)
     async def test_metron(request: Request, db: Session = Depends(get_db)):
-        username = settings_store.get(db, "metron.username")
-        password = settings_store.get(db, "metron.password")
-        if not username or not password:
-            ok, message = False, "Save a Metron username and password first."
+        username, password, token = settings_store.metron_login(db)
+        if not settings_store.metron_ready(db):
+            ok, message = False, "Save a Metron API token (or username and password) first."
         else:
             try:
-                async with MetronClient(username, password, app.state.metron_limiter) as client:
+                async with app.state.make_metron_client(username, password, token) as client:
                     await client.check_login()
                 limiter = app.state.metron_limiter
                 ok = True
-                message = "Connected."
+                message = "Connected with the API token." if token else "Connected (username and password)."
                 if limiter.sustained_remaining is not None:
-                    message += f" {limiter.sustained_remaining} requests left today."
+                    message += f" {limiter.sustained_remaining}"
+                    if limiter.sustained_limit:
+                        message += f" of {limiter.sustained_limit:,}"
+                    message += " requests left today."
             except MetronAuthError:
-                ok, message = False, "Metron rejected the username or password."
+                ok, message = (
+                    False,
+                    "Metron rejected the " + ("API token." if token else "username or password."),
+                )
             except MetronError as exc:
                 ok, message = False, str(exc)
             except Exception as exc:  # network errors
                 ok, message = False, f"Could not reach Metron: {type(exc).__name__}"
+        return templates.TemplateResponse(request, "_test_result.html", {"ok": ok, "message": message})
+
+    @app.post("/settings/test/getcomics", response_class=HTMLResponse)
+    async def test_getcomics(request: Request, db: Session = Depends(get_db)):
+        get = lambda k: settings_store.get(db, k)  # noqa: E731
+        try:
+            async with GetComicsClient(get("getcomics.url"), get("flaresolverr.url")) as gc:
+                posts = await gc.check()
+            async with DirectClient(get("ddl.path")) as ddl:
+                folder = await ddl.check()
+            ok, message = True, f"GetComics answered ({posts} posts on its front page); {folder} is writable."
+        except (GetComicsError, DownloaderError) as exc:
+            ok, message = False, str(exc)
+        return templates.TemplateResponse(request, "_test_result.html", {"ok": ok, "message": message})
+
+    @app.post("/settings/test/shelfmark", response_class=HTMLResponse)
+    async def test_shelfmark(request: Request, db: Session = Depends(get_db)):
+        url = settings_store.get(db, "shelfmark.url")
+        if not url:
+            ok, message = False, "Save Shelfmark's URL first."
+        else:
+            try:
+                async with ShelfmarkClient(url, settings_store.get(db, "shelfmark.api_key")) as sm:
+                    await sm.check()
+                ok, message = True, "Connected."
+            except ShelfmarkError as exc:
+                ok, message = False, str(exc)
         return templates.TemplateResponse(request, "_test_result.html", {"ok": ok, "message": message})
 
     register_library_routes(app, templates, get_db)

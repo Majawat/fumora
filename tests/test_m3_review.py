@@ -9,7 +9,7 @@ from sqlalchemy import select
 from fumora import settings_store
 from fumora.catalog import add_series
 from fumora.metron import BASE_URL
-from fumora.models import Issue, Job, Release, Series
+from fumora.models import Issue, Job, Release, Series, Setting
 from fumora.refresh import rolling_selection, update_releases
 from fumora.scheduler import due
 from tests.test_m3_refresh import SERIES_DETAIL, client, page
@@ -102,3 +102,27 @@ def test_upcoming_includes_issues_with_only_a_cover_date(logged_in, app):
                              monitored=True, locked_fields=[])])  # fmt: skip
         db.commit()
     assert "Solicited" in logged_in.get("/releases").text
+
+
+def test_each_install_gets_its_own_random_refresh_time(app):
+    import random
+
+    from fumora.scheduler import ensure_refresh_time
+
+    with app.state.session_factory() as db:
+        db.query(Setting).filter(Setting.key == "schedule.refresh_time").delete()
+        db.commit()
+        at = ensure_refresh_time(db, random.Random(7))
+        hh, mm = at.split(":")
+        assert 0 <= int(hh) < 24 and 0 <= int(mm) < 60
+        assert ensure_refresh_time(db) == at  # kept, not re-rolled
+        settings_store.put(db, "schedule.refresh_time", "")
+        db.commit()
+        assert ensure_refresh_time(db) == ""  # off stays off
+    times = set()
+    for seed in range(10):
+        with app.state.session_factory() as db:
+            db.query(Setting).filter(Setting.key == "schedule.refresh_time").delete()
+            db.commit()
+            times.add(ensure_refresh_time(db, random.Random(seed)))
+    assert len(times) > 5

@@ -1,5 +1,5 @@
 {% if error %}<p class="error">{{ error }}</p>{% else %}
-<p class="muted small">Searched Prowlarr for {% for q in queries %}"{{ q }}"{% if not loop.last %} and {% endif %}{% endfor %}. Best first.{% if busy %} A download for this issue is already under way (<a href="/queue">Queue</a>).{% endif %}</p>
+<p class="muted small">Searched {{ sources|join(", ") }} for {% for q in queries %}"{{ q }}"{% if not loop.last %} and {% endif %}{% endfor %}. Best first.{% if problems %} <span class="error">{{ problems|join("; ") }}</span>{% endif %}{% if busy %} A download for this issue is already under way (<a href="/queue">Queue</a>).{% endif %}</p>
 {% if accepted %}
 <div class="scroll">
 <table class="log results">
@@ -19,6 +19,26 @@
 </table>
 </div>
 {% else %}<p class="muted">No acceptable release found.</p>{% endif %}
+{% if held %}
+<h3 class="small">Other languages ({{ held|length }})</h3>
+<p class="muted small">Not in your language list. Grab one by hand if it's the only edition you'll get.</p>
+<div class="scroll">
+<table class="log results">
+  <thead><tr><th>Release</th><th>Language</th><th>Size</th><th>Score</th><th></th></tr></thead>
+  <tbody>
+  {% for c in held %}
+  <tr>
+    <td>{{ c.parsed.title }}<small class="muted why">{{ c.release.indexer }} · {{ c.protocol }}</small></td>
+    <td>{{ c.language }}</td>
+    <td>{{ "%.0f"|format(c.size_mb) }} MB</td>
+    <td>{{ c.score }}</td>
+    <td>{% if c.blocklisted %}<span class="muted small">blocklisted</span>{% else %}<form method="post" action="/issues/{{ i.id }}/grab"><input type="hidden" name="token" value="{{ token }}"><input type="hidden" name="index" value="{{ accepted|length + loop.index0 }}"><button class="small secondary">Grab anyway</button></form>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
 {% if close %}
 <details><summary class="small">{{ close|length }} matching releases rejected by your profile</summary>
 <table class="log small">

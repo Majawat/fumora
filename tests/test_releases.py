@@ -74,7 +74,8 @@ def test_matching_issue_number_series_and_year():
         parse_release("Saga 001-003 (2012) (Digital-1920) (Zone-Empire)"), ["Saga"], "2", (2012,)
     )
     assert not matches_issue(parse_release("Saga of the Swamp Thing 002 (1982)"), ["Saga"], "2", (2012,))
-    assert not matches_issue(parse_release("Thorgal Saga 005 (2025) FRENCH"), ["Thorgal Saga"], "5", (2025,))
+    # Language is the profile's decision (search.evaluate), not matching's.
+    assert matches_issue(parse_release("Thorgal Saga 005 (2025) FRENCH"), ["Thorgal Saga"], "5", (2025,))
 
 
 def test_matching_volumes_only_for_collected_editions():

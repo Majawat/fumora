@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from . import settings_store
 from .importer import _parse_date, apply_metron_series, log, sync_series_issues
 from .jobs import JobContext
-from .metron import MetronAuthError, MetronClient, MetronError, MetronPause
+from .metron import MetronAuthError, MetronClient, MetronError, MetronPause, _open
 from .models import Release, Series
 
 REFRESH = "refresh"
@@ -155,18 +155,17 @@ def make_refresh_handler(make_client):
         sf = ctx.session_factory
         started = datetime.now(UTC)
         with sf() as db:
-            user = settings_store.get(db, "metron.username")
-            password = settings_store.get(db, "metron.password")
+            user, password, token = settings_store.metron_login(db)
             try:
                 batch = int(settings_store.get(db, "schedule.refresh_batch") or DEFAULT_BATCH)
             except ValueError:
                 batch = DEFAULT_BATCH
-        if not user or not password:
-            raise RuntimeError("Metron username and password are not set")
+        if not settings_store.metron_usable(user, password, token):
+            raise RuntimeError("No Metron API token (or username and password) is set")
 
         totals = {"series": 0, "new": 0, "stale": 0, "errors": 0}
         releases = 0
-        async with make_client(user, password) as client:
+        async with _open(make_client, user, password, token) as client:
             if explicit:
                 ids = explicit
             else:

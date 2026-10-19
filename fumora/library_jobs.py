@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from . import naming, settings_store
 from .importer import log
 from .jobs import JobContext
-from .metron import MetronAuthError, MetronClient, MetronError, MetronPause
+from .metron import MetronAuthError, MetronClient, MetronError, MetronPause, _open
 from .models import Issue, Series
 from .scanner import scan_folders
 from .tagging import ensure_detail, tag_file
@@ -47,8 +47,7 @@ def make_retag_handler(make_client: Callable[[str, str], MetronClient]):
         ids = _series_ids(ctx)
         sf = ctx.session_factory
         with sf() as db:
-            user = settings_store.get(db, "metron.username")
-            password = settings_store.get(db, "metron.password")
+            user, password, token = settings_store.metron_login(db)
             recycle = settings_store.get(db, "library.recycle_path")
             q = select(Issue.id).join(Series).where(Issue.files.any()).order_by(Series.id, Issue.sort_number)
             if ids:
@@ -58,14 +57,14 @@ def make_retag_handler(make_client: Callable[[str, str], MetronClient]):
                 # (no Metron requests spent on files that can't be written).
                 q = q.where(or_(Series.match_status != "matched", Series.confirmed_by.is_not(None)))
             issue_ids = db.scalars(q).all()
-        if not user or not password:
-            raise RuntimeError("Metron username and password are not set")
+        if not settings_store.metron_usable(user, password, token):
+            raise RuntimeError("No Metron API token (or username and password) is set")
         done = params.get("done_issue_ids") or []
         done_set = set(done)
         todo = [i for i in issue_ids if i not in done_set]
         ctx.update(phase="preview" if dry_run else "write", progress=len(done), total=len(issue_ids))
         counts = {"changed": 0, "unchanged": 0, "errors": 0}
-        async with make_client(user, password) as client:
+        async with _open(make_client, user, password, token) as client:
             for n, issue_id in enumerate(todo, len(done) + 1):
                 with sf() as db:
                     issue = db.scalar(
