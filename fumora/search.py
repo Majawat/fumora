@@ -139,6 +139,7 @@ def evaluate(release: dict, issue: Issue, profile: Profile) -> Candidate:
     series = issue.series
     names = [n for n in (series.name, series.mylar_name) if n]
     collected = series.series_type in COLLECTED_TYPES
+    as_volumes = not collected and series.issues_are_volumes  # manga: "Vol. 12" is issue 12
     years = (series.year_began, issue.cover_date.year if issue.cover_date else None)
 
     one_volume = collected and len(series.issues) == 1 and normalize_number(issue.number) == "1"
@@ -149,6 +150,10 @@ def evaluate(release: dict, issue: Issue, profile: Profile) -> Candidate:
         c.identified = matches_volume(rel, names, issue.number, strict=False)
         if not matches_volume(rel, names, issue.number):
             c.rejections.append("not this volume" if not c.identified else "ebook")
+    elif as_volumes and matches_volume(rel, names, issue.number, strict=False):
+        c.identified = True
+        if rel.ebook:
+            c.rejections.append("ebook, not a comic archive")
     elif not matches_issue(rel, names, issue.number, years):
         c.identified = matches_issue(rel, names, issue.number, years, strict=False)
         if rel.ebook:
@@ -167,7 +172,7 @@ def evaluate(release: dict, issue: Issue, profile: Profile) -> Candidate:
             c.hold = f"language: {c.language}"
 
     size = c.size_mb
-    limit = profile.max_collected_mb if (collected or rel.kind == "range") else profile.max_mb
+    limit = profile.max_collected_mb if (collected or as_volumes or rel.kind == "range") else profile.max_mb
     if size and size < profile.min_mb:
         c.rejections.append(f"too small ({size:.0f} MB)")
     if size > limit:

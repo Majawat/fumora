@@ -145,7 +145,8 @@ def parse_release(title: str) -> ParsedRelease:
             r.number = normalize_number(rm.group(1))
 
     # Scene names: "Publisher-Series ... YEAR HYBRID COMIC[ eBook-GROUP]".
-    sm = re.match(r"^([A-Za-z ]+?)-([A-Za-z].*)$", body.strip())
+    # Also "Publisher - Series" ("Yen.Press.-.Mieruko.Chan..." once dots are spaces).
+    sm = re.match(r"^([A-Za-z ]+?)\s*-\s*([A-Za-z].*)$", body.strip())
     if sm and sm.group(1).lower().strip() in SCENE_PUBLISHERS:
         body = sm.group(2)
     if re.search(r"hybrid\s+comic|retail\s+comic|hybrid\s+manga", lowered):

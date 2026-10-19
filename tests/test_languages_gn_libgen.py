@@ -310,3 +310,54 @@ def test_new_install_logs_its_random_refresh_time(app, client):
     with app.state.session_factory() as db:
         events = [e.message for e in db.scalars(select(Event))]
     assert any("Daily Metron refresh set to" in m for m in events)
+
+
+# --- manga: volumes listed as issues ---------------------------------------------------------
+
+
+def _manga(db, numbering="auto", titles=True):
+    s = Series(name="Mieruko-chan", year_began=2020, match_status="not_found", locked_fields=[],
+               monitored=True, numbering=numbering)  # fmt: skip
+    for n in range(1, 13):
+        db.add(Issue(series=s, number=str(n), title=f"Volume {n}" if titles else None,
+                     cover_date=date(2020 + n // 3, 1, 1), locked_fields=[], monitored=True))  # fmt: skip
+    db.add(s)
+    db.commit()
+    return db.scalar(select(Issue).where(Issue.series_id == s.id, Issue.number == "12"))
+
+
+@pytest.mark.parametrize(
+    ("title", "size", "ok"),
+    [
+        ("Yen.Press-Mieruko.Chan.Vol.12.2026.Retail.Comic", 439, True),  # big: collected limit applies
+        ("Mieruko-Chan, Vol. 12 by Tomoki Izumi [ENG / PDF]", 439, True),
+        ("Mieruko-chan v12 (2026) (Digital) (1r0n)", 90, True),
+        ("Yen.Press.-.Mieruko.Chan.Vol.12.2026.Retail.Comic.eBook-BitBook.cbz", 439, True),  # Libgen
+        ("Mieruko-chan Vol. 11 by Tomoki Izumi [ENG / CBZ]", 80, False),  # another volume
+        ("Mieruko-chan Vol. 12 by Tomoki Izumi [ENG / EPUB]", 80, False),  # ebook
+    ],
+)
+def test_manga_volumes_match_issue_numbers(app, title, size, ok):
+    with app.state.session_factory() as db:
+        issue = _manga(db)
+        assert issue.series.issues_are_volumes
+        c = evaluate({"title": title, "size": size * 2**20, "protocol": "usenet"}, issue, Profile())
+    assert c.accepted is ok, c.rejections
+
+
+def test_numbering_can_be_set_by_hand(app, logged_in):
+    with app.state.session_factory() as db:
+        issue = _manga(db, titles=False)
+        sid = issue.series_id
+        assert not issue.series.issues_are_volumes  # no "Volume N" titles: issue numbering
+    logged_in.post(f"/series/{sid}/edit", data={"numbering": "volumes"})
+    with app.state.session_factory() as db:
+        s = db.get(Series, sid)
+        assert s.numbering == "volumes" and s.issues_are_volumes
+        c = evaluate(_release("Mieruko-chan v12 (2026) (Digital)"), _issue(db, "12"), Profile())
+    assert c.accepted
+
+
+def test_libgen_folder_paths_are_dropped():
+    raw = r"Yen.Press.-.Mieruko.Chan.Vol.12.2026.Retail.Comic.eBook-BitBook s:\scene\2026-04\Yen"
+    assert clean_libgen_title(raw) == "Yen.Press.-.Mieruko.Chan.Vol.12.2026.Retail.Comic.eBook-BitBook"

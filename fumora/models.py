@@ -5,6 +5,7 @@ cross-reference columns, so a series that exists only on ComicVine still fits
 and a Metron re-id is a one-column update. Field names follow Metron's API.
 """
 
+import re
 from datetime import UTC, date, datetime
 
 from sqlalchemy import (
@@ -24,6 +25,9 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+_VOLUME_TITLE = re.compile(r"^\s*vol(?:ume)?\.?\s*\d+\s*$", re.I)
 
 
 class Base(DeclarativeBase):
@@ -102,6 +106,10 @@ class Series(Base):
     # New issues found by a Metron refresh start monitored (Sonarr's "monitor new items").
     monitor_new: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
     path: Mapped[str | None] = mapped_column(String(1024))
+    # How releases number this series' issues: 'issues' (#12), 'volumes' (Vol. 12:
+    # manga and digests, which ComicVine lists as issues), or 'auto' (volumes when
+    # the issues are titled "Volume N", as ComicVine names manga volumes).
+    numbering: Mapped[str] = mapped_column(String(10), default="auto", server_default="auto")
     # Metron age-rating vocabulary; overrides the rating calculated from issues.
     age_rating_override: Mapped[str | None] = mapped_column(String(30))
     # Field names a user edited; a refresh never overwrites these.
@@ -131,6 +139,14 @@ class Series(Base):
 
     publisher: Mapped[Publisher | None] = relationship()
     imprint: Mapped[Imprint | None] = relationship()
+
+    @property
+    def issues_are_volumes(self) -> bool:
+        if self.numbering in ("issues", "volumes"):
+            return self.numbering == "volumes"
+        titled = [i.title for i in self.issues if i.title]
+        named = [t for t in titled if _VOLUME_TITLE.match(t)]
+        return bool(named) and len(named) * 2 >= len(titled)
 
     @property
     def writable(self) -> bool:

@@ -45,7 +45,7 @@
 </dl>
 
 <form class="card" method="post" action="/series/{{ s.id }}/edit">
-  <h2>Age rating and tags</h2>
+  <h2>Age rating, tags, numbering</h2>
   <label>Age rating
     <select name="age_rating">
       <option value="">Calculated from issues ({{ calculated_rating or "none known" }})</option>
@@ -56,6 +56,14 @@
   <label>Tags
     <input name="tags" value="{{ tag_names }}" placeholder="e.g. Explicit">
     <small>Comma-separated. Added to each file's ComicInfo &lt;Tags&gt; (tags already in a file are kept).</small>
+  </label>
+  <label>Releases number it by
+    <select name="numbering">
+      <option value="auto" {% if s.numbering == "auto" %}selected{% endif %}>Automatic (now: {{ "volumes" if s.issues_are_volumes else "issues" }})</option>
+      <option value="issues" {% if s.numbering == "issues" %}selected{% endif %}>Issue (#12)</option>
+      <option value="volumes" {% if s.numbering == "volumes" %}selected{% endif %}>Volume (Vol. 12): manga, digests</option>
+    </select>
+    <small>Manga volumes are listed as issues (ComicVine "Volume 12" = issue 12). Volume numbering also uses the collected-edition size limit.</small>
   </label>
   <button>Save</button>
 </form>

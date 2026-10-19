@@ -109,6 +109,17 @@ Jinja2 + htmx. Image: `ghcr.io/majawat/fumora:edge` (built from `main`).
   fumora-test now also mounts `/mnt/user/data/Shelfmark:/data/Shelfmark:rw`;
   test `shelfmark.sources=libgen`. Test DB: Black Hole #1/#3 file rows were
   dropped to make them wanted (#3 has no live Libgen copy).
+- **Manga (series not on Metron, e.g. Mieruko-chan, from Mylar with CV ids):**
+  `Series.numbering` auto|issues|volumes (migration 0008); auto = volumes when
+  issues are titled "Volume N" (ComicVine's manga naming). Volume numbering
+  matches "Vol. 12" to issue 12 and uses the collected size limit. Parser now
+  strips "Publisher - Series" prefixes (Libgen's "Yen.Press.-.Mieruko..."),
+  Libgen folder paths are dropped. Live 2026-10-19: auto search for
+  Mieruko-chan v12 on test grabbed Libgen's copy (dead on the CDN), the monitor
+  re-searched by itself; only other copy is MyAnonamouse (torrent, can't import
+  on fumora-test's layout). Mieruko-chan was copied into the test DB (id 15,
+  only #12 monitored). GAP: not-on-Metron series never get new issues (refresh
+  is Metron-only); plan = ComicVine fallback refresh by cv_id.
 - **Shelfmark's Anna's Archive search is broken on Shelfmark's side** (v1.4.0):
   owner removed the bad `annas-archive.is` mirror; AA's search now answers with a
   DDoS-Guard CAPTCHA no bypasser can solve (byparr update didn't help; Shelfmark

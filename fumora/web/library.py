@@ -143,9 +143,11 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
         series_id: int,
         age_rating: str = Form(""),
         tags: str = Form(""),
+        numbering: str = Form("auto"),
         db: Session = Depends(get_db),
     ):
         series = _get_series(db, series_id)
+        series.numbering = numbering if numbering in ("auto", "issues", "volumes") else "auto"
         series.age_rating_override = age_rating if age_rating in METRON_RATINGS else None
         wanted = []
         for name in (t.strip() for t in tags.split(",")):

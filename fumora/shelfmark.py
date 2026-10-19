@@ -42,6 +42,8 @@ def clean_libgen_title(title: str) -> str:
     Keep the catalogue's 'Series #N', its year, and the file name's bracketed tags
     (source, group); drop story titles, ISBNs and image sizes, whose numbers would
     confuse the release parser."""
+    # Some rows end in the uploader's folder path: "... s:\\scene\\2026-04\\Yen.Press...".
+    title = re.sub(r"\s+\S*\\\S.*$", "", title)
     m = re.match(r"^(?P<meta>.*?)\s+c c \d+\s+(?P<file>.*)$", title)
     if not m:
         return title
