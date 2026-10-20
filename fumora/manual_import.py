@@ -91,12 +91,13 @@ def check_path(db: Session, path: str) -> str:
         raise ImportPathError("Enter a folder to import from.")
     # normpath after realpath: symlinks resolved, then the form CodeQL's path check expects.
     real = os.path.normpath(os.path.realpath(path))
-    for root in roots(db):
-        if real == root or real.startswith(root.rstrip("/") + "/"):
-            if not os.path.exists(real):
-                raise ImportPathError(f"{path} doesn't exist.")
-            return real
-    raise ImportPathError(f"{path} isn't under an import folder ({', '.join(roots(db))}; see Settings).")
+    allowed = roots(db)
+    root = next((r for r in allowed if real[len(r) : len(r) + 1] in ("", "/") and real[: len(r)] == r), None)
+    if root is None or not real.startswith(root):
+        raise ImportPathError(f"{path} isn't under an import folder ({', '.join(allowed)}; see Settings).")
+    if not os.path.exists(real):
+        raise ImportPathError(f"{path} doesn't exist.")
+    return real
 
 
 def list_files(path: str) -> list[Path]:
