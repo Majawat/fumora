@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Import files · Fumora{% endblock %}
+{% block content %}
+<h1>Import files</h1>
+<p class="muted">Comic files you got yourself: Fumora proposes a series and issue for each one (from ids or ComicInfo inside the file, else its name or folder). Check the rows, then import: each file is named, moved or hardlinked into its series folder, converted to CBZ and tagged, just like a download. Nothing is ever overwritten.</p>
+
+<form method="get" action="/manual-import" class="card row">
+  <label>Folder
+    <input name="path" value="{{ path }}" placeholder="/data/downloads/comics" size="50" required>
+  </label>
+  <button>Look at the files</button>
+  <span class="muted small">Under {{ roots|join(", ") }} (Settings → Folders you can import files from).</span>
+</form>
+
+{% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+{% if running %}<p class="notice">An import is running: <a href="/jobs">see Jobs</a>.</p>{% endif %}
+
+{% if rows %}
+{% set ticked = ticked if ticked is defined else none %}
+<form method="post" action="/manual-import">
+  <input type="hidden" name="path" value="{{ path }}">
+  <datalist id="series-list">{% for label in labels.values() %}<option value="{{ label }}">{% endfor %}</datalist>
+  <p class="muted">{{ rows|length }} files{% if rows|length >= 500 %} (the first 500){% endif %}, {{ rows|selectattr("ready")|list|length }} ready. Change a series or number and import: rows are checked again first.</p>
+  <div class="scroll"><table class="log">
+    <thead><tr><th><input type="checkbox" checked onclick="document.querySelectorAll('input[name=include]').forEach(c => c.checked = this.checked)" aria-label="all"></th><th>File</th><th>Series</th><th>#</th><th>Goes to</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+    <tr>
+      <td><input type="checkbox" name="include" value="{{ loop.index0 }}" {% if (ticked is none and r.ready) or (ticked is not none and loop.index0 in ticked) %}checked{% endif %}></td>
+      <td><input type="hidden" name="file" value="{{ r.path }}">{{ r.name }}<br><small class="muted">{{ (r.size / 1048576)|round(1) }} MB{% if r.evidence %} · matched by {{ r.evidence }}{% endif %}</small></td>
+      <td><input name="series" list="series-list" value="{{ labels.get(r.series_id, '') }}" size="34" placeholder="Pick a series"></td>
+      <td><input name="number" value="{{ r.number or '' }}" size="5"></td>
+      <td>{% if r.problem %}<span class="error small">{{ r.problem }}</span>{% else %}<small class="path">{{ r.dest }}</small>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <div class="row card">
+    <label class="inline"><input type="radio" name="mode" value="move" {% if mode != "hardlink" %}checked{% endif %}> Move the files</label>
+    <label class="inline"><input type="radio" name="mode" value="hardlink" {% if mode == "hardlink" %}checked{% endif %}> Hardlink (keeps the originals, e.g. still seeding; tagged only if torrent imports are)</label>
+    <button {% if running %}disabled{% endif %}>Import ticked files</button>
+  </div>
+</form>
+{% elif path and not error %}
+<p class="muted">No comic files (CBZ, CBR, CB7, CBT, PDF) there.</p>
+{% endif %}
+{% endblock %}

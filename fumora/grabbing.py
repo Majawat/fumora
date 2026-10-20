@@ -242,6 +242,49 @@ def _remove_download_folder(path: str, category: str) -> None:
         pass
 
 
+def destination(series: Series, issue: Issue, src: Path, opts: dict) -> Path:
+    """Where `src` goes in the library as `issue`'s file (named by the naming settings)."""
+    name = naming.render(
+        opts["file_template"], naming.context(series, issue), opts["colon"], opts["apostrophes"]
+    )
+    return Path(series.path) / f"{name}{src.suffix.lower()}"
+
+
+def place_issue_file(
+    db: Session, series: Series, issue: Issue, src: Path, keep_original: bool, opts: dict
+) -> tuple[File | None, str | None]:
+    """Name and place `src` as `issue`'s file: hardlink (keep_original) or move,
+    converting CBR/CB7/CBT/PDF to CBZ. Returns the new File, or None and why not.
+    Never overwrites: an issue with a file, or a taken name, is skipped."""
+    if issue.files:
+        return None, f"#{issue.number} already has a file"
+    if not series.path:
+        series.path = folder_for(db, series)
+    dest = destination(series, issue, src, opts)
+    # A file already sitting at its own name (e.g. unlinked in the series folder) is just linked.
+    in_place = dest.exists() and dest.resolve() == src.resolve()
+    if not in_place and (dest.exists() or dest.with_suffix(".cbz").exists()):
+        return None, f"{dest.with_suffix('.cbz').name} already exists"
+    # The folder scan may know the file already (not linked to an issue).
+    known = db.scalar(select(File).where(File.path == str(src), File.issue_id.is_(None)))
+    if in_place and not convert.needs_conversion(src):
+        placed = src
+    elif convert.needs_conversion(src):
+        placed = _place_converted(src, dest)
+        if not keep_original:
+            src.unlink(missing_ok=True)  # the source's own copy, now converted
+    else:
+        placed = _place(src, dest, "torrent" if keep_original else "usenet")
+    if known is not None and (placed == src or not keep_original):
+        known.path, known.size = str(placed), placed.stat().st_size
+        row = known
+    else:
+        row = File(path=str(placed), size=placed.stat().st_size)
+    issue.files.append(row)
+    db.commit()  # the file is in the library now: record it whatever happens next
+    return row, None
+
+
 def tags_on_import(db: Session, protocol: str) -> bool:
     """Imports are tagged (torrents only when asked: tagging rewrites the seeded file)."""
     if protocol == "torrent":
@@ -290,25 +333,13 @@ def import_grab(db: Session, g: Grab, path: str) -> str:
         if issue is None:
             skipped.append(f"{f.name}: no matching issue")
             continue
-        if issue.files:
-            skipped.append(f"{f.name}: #{issue.number} already has a file")
-            continue
-        name = naming.render(
-            opts["file_template"], naming.context(series, issue), opts["colon"], opts["apostrophes"]
+        # A torrent keeps seeding its original: hardlink it (or convert a copy).
+        row, problem = place_issue_file(
+            db, series, issue, f, keep_original=g.protocol == "torrent", opts=opts
         )
-        dest = Path(series.path) / f"{name}{f.suffix.lower()}"
-        if dest.exists() or dest.with_suffix(".cbz").exists():
-            skipped.append(f"{f.name}: {dest.with_suffix('.cbz').name} already exists")
+        if row is None:
+            skipped.append(f"{f.name}: {problem}")
             continue
-        if convert.needs_conversion(f):
-            placed = _place_converted(f, dest)
-            if g.protocol != "torrent":  # a torrent keeps seeding its original
-                f.unlink(missing_ok=True)  # the download's own copy, now converted
-        else:
-            placed = _place(f, dest, g.protocol)
-        row = File(path=str(placed), size=placed.stat().st_size)
-        issue.files.append(row)
-        db.commit()  # the file is in the library now: record it whatever happens next
         if series.writable and tags_on:
             tag_file(issue, row, dry_run=False, recycle_dir=recycle)
             db.commit()

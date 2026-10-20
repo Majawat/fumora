@@ -25,6 +25,7 @@ from .import_job import KIND as MYLAR_IMPORT
 from .import_job import make_handler as make_import_handler
 from .jobs import JobRunner
 from .library_jobs import ORGANIZE, RETAG, SCAN, make_organize_handler, make_retag_handler, make_scan_handler
+from .manual_import import MANUAL_IMPORT, make_manual_import_handler
 from .metron import MetronAuthError, MetronClient, MetronError, RateLimiter
 from .models import Event, Issue, Series, User
 from .refresh import REFRESH, make_refresh_handler
@@ -32,6 +33,7 @@ from .scheduler import ensure_refresh_time, run_download_monitor, run_scheduler
 from .shelfmark import ShelfmarkClient, ShelfmarkError
 from .sources import CV_REFRESH, make_cv_refresh_handler
 from .web.catalog_routes import register_catalog_routes
+from .web.import_routes import register_import_routes
 from .web.library import register_library_routes
 from .web.library_admin import register_admin_routes
 from .web.monitor_routes import register_monitor_routes
@@ -84,6 +86,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     jobs.register(RETAG, make_retag_handler(make_metron_client, make_cv_client))
     # Full issue records just before an import, so new files get full tags (#24).
     details = DetailFetcher(make_metron_client, metron_limiter, make_cv_client, comicvine_limiter)
+    jobs.register(MANUAL_IMPORT, make_manual_import_handler(details.fetch))
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -330,6 +333,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     register_monitor_routes(app, templates, get_db)
     register_catalog_routes(app, templates, get_db)
     register_search_routes(app, templates, get_db)
+    register_import_routes(app, templates, get_db)
 
     @app.get("/api/health")
     def health():

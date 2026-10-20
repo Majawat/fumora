@@ -30,8 +30,8 @@ Jinja2 + htmx. Image: `ghcr.io/majawat/fumora:edge` (built from `main`).
 | PDF → CBZ (extract page images or render at 300 dpi) | merged 2026-10-18 | #26 |
 | M5a GetComics + Anna's Archive (via Shelfmark) | merged 2026-10-20 | #27 |
 | M5b other sources: ComicVine refresh, move to Metron, add from ComicVine, reading direction, Metron gaps page | merged 2026-10-20 | #28 |
-| Full tags at import (#24): Metron or ComicVine issue record before an import; version 0.5.0 | on test, branch `m5c-import-tags` | — |
-| M5 rest: TPB links, GCD ratings, manual series, split/join | not started | — |
+| M5c: full tags at import (#24: Metron or ComicVine issue record first), Import files page (manual import), version 0.5.0 | on test, branch `m5c-import-tags` | #29 |
+| M5 rest: TPB fallback (TPB = own series; grab only when single issues aren't available), GCD ratings via the GCD API (needs the owner's GCD account), manual series, split/join, notifications (back burner) | not started | — |
 | M6 side-by-side week with Mylar, cut over | not started | — |
 
 ### Where M4 part 2 stands
