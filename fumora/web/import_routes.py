@@ -59,11 +59,11 @@ def register_import_routes(app: FastAPI, templates: Jinja2Templates, get_db) -> 
         rows, items, issues = [], [], set()
         for n, (p, label, number) in enumerate(zip(paths, series, numbers, strict=True)):
             try:
-                check_path(db, str(p))
+                real = check_path(db, str(p))  # only ever the checked path from here on
             except ImportPathError as exc:
                 raise HTTPException(400, str(exc)) from exc
             m = _ID.search(str(label))
-            row = resolve(db, str(p), int(m.group(1)) if m else None, str(number))
+            row = resolve(db, real, int(m.group(1)) if m else None, str(number))
             if label and not m and not row.problem:
                 row.problem = "Pick the series from the list."
             if row.ready and row.issue_id in issues and n in chosen:

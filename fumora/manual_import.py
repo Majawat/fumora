@@ -90,11 +90,12 @@ def check_path(db: Session, path: str) -> str:
     if not path:
         raise ImportPathError("Enter a folder to import from.")
     real = os.path.realpath(path)
-    if not any(real == r or real.startswith(r.rstrip("/") + "/") for r in roots(db)):
-        raise ImportPathError(f"{path} isn't under an import folder ({', '.join(roots(db))}; see Settings).")
-    if not os.path.exists(real):
-        raise ImportPathError(f"{path} doesn't exist.")
-    return real
+    for root in roots(db):
+        if real == root or real.startswith(root.rstrip("/") + "/"):
+            if not os.path.exists(real):
+                raise ImportPathError(f"{path} doesn't exist.")
+            return real
+    raise ImportPathError(f"{path} isn't under an import folder ({', '.join(roots(db))}; see Settings).")
 
 
 def list_files(path: str) -> list[Path]:
