@@ -28,8 +28,8 @@ Jinja2 + htmx. Image: `ghcr.io/majawat/fumora:edge` (built from `main`).
 | M4 part 1: release parser, Prowlarr search, decisions | merged | #23 |
 | M4 part 2: grab, download monitor, import | merged 2026-10-18 | #25 |
 | PDF → CBZ (extract page images or render at 300 dpi) | merged 2026-10-18 | #26 |
-| M5a GetComics + Anna's Archive (via Shelfmark) | on test, branch `m5-ddl`, PR open | #27 |
-| M5b other sources: ComicVine refresh, move to Metron, add from ComicVine, reading direction, Metron gaps page | on test, branch `m5b-sources` (on top of `m5-ddl`), PR open | #28 |
+| M5a GetComics + Anna's Archive (via Shelfmark) | merged 2026-10-20 | #27 |
+| M5b other sources: ComicVine refresh, move to Metron, add from ComicVine, reading direction, Metron gaps page | merged 2026-10-20 | #28 |
 | M5 rest: TPB links, GCD ratings, full tags at import (#24), manual series, split/join | not started | — |
 | M6 side-by-side week with Mylar, cut over | not started | — |
 
