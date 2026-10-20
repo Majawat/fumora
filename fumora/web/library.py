@@ -22,6 +22,7 @@ from ..library_jobs import ORGANIZE, RETAG, SCAN, naming_settings, shared_folder
 from ..metron import MetronError
 from ..models import File, Issue, Series, Tag
 from ..ratings import METRON_RATINGS, series_rating, strictest
+from ..sources import CHECK_NOTE, CV_REFRESH, accept_suggestion, reject_metron_match
 
 MATCH_LABELS = {
     "matched": "Matched",
@@ -133,6 +134,7 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
     @app.post("/series/{series_id}/not-on-metron")
     def series_not_on_metron(series_id: int, db: Session = Depends(get_db)):
         series = _get_series(db, series_id)
+        reject_metron_match(series)  # never matched or suggested again
         unmatch_series(db, series, "Marked by hand as not on Metron")
         log(db, f"'{series.name}' marked as not on Metron", series_id=series.id)
         db.commit()
@@ -144,9 +146,11 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
         age_rating: str = Form(""),
         tags: str = Form(""),
         numbering: str = Form("auto"),
+        reading_direction: str = Form(""),
         db: Session = Depends(get_db),
     ):
         series = _get_series(db, series_id)
+        series.reading_direction = reading_direction if reading_direction in ("ltr", "rtl") else None
         series.numbering = numbering if numbering in ("auto", "issues", "volumes") else "auto"
         series.age_rating_override = age_rating if age_rating in METRON_RATINGS else None
         wanted = []
@@ -169,6 +173,16 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
         if active is not None:
             raise HTTPException(409, f"A {kind} job is already running; try again when it finishes.")
         app.state.jobs.start(kind, params)
+
+    @app.post("/series/{series_id}/refresh-cv")
+    async def series_refresh_cv(series_id: int, db: Session = Depends(get_db)):
+        series = _get_series(db, series_id)
+        if series.source != "cv" or series.cv_id is None:
+            raise HTTPException(400, "This series doesn't follow ComicVine.")
+        if not settings_store.is_set(db, "comicvine.api_key"):
+            raise HTTPException(400, "Save a ComicVine API key in Settings first.")
+        _start(CV_REFRESH, {"series_ids": [series_id]})
+        return RedirectResponse("/jobs", status_code=303)
 
     @app.post("/series/{series_id}/scan")
     async def series_scan(series_id: int, db: Session = Depends(get_db)):
@@ -289,6 +303,21 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
         series = db.get(Series, series_id)
         if series is None or not series.suggested_metron_id:
             raise HTTPException(404)
+        if (series.match_note or "").startswith(CHECK_NOTE):
+            # Suggested by the monthly Metron check: move it now, no Mylar involved.
+            user, password, token = settings_store.metron_login(db)
+            if not settings_store.metron_usable(user, password, token):
+                raise HTTPException(
+                    400, "Save a Metron API token (or username and password) in Settings first."
+                )
+            try:
+                async with app.state.make_metron_client(user, password, token) as client:
+                    await accept_suggestion(db, client, series)
+                db.commit()
+            except (MetronError, ValueError) as exc:
+                db.rollback()
+                raise HTTPException(502, str(exc)) from exc
+            return RedirectResponse(f"/series/{series_id}", status_code=303)
         series.match_status = "accepted"
         db.commit()
         app.state.jobs.start(MYLAR_IMPORT, {"skip_read": True})

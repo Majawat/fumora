@@ -1,6 +1,6 @@
 # Fumora — handoff
 
-State as of 2026-10-19. Read this, `CLAUDE.md` (coding rules) and the design doc
+State as of 2026-10-20. Read this, `CLAUDE.md` (coding rules) and the design doc
 (link in `docs/DESIGN.md`) before continuing.
 
 ## What Fumora is
@@ -28,8 +28,9 @@ Jinja2 + htmx. Image: `ghcr.io/majawat/fumora:edge` (built from `main`).
 | M4 part 1: release parser, Prowlarr search, decisions | merged | #23 |
 | M4 part 2: grab, download monitor, import | merged 2026-10-18 | #25 |
 | PDF → CBZ (extract page images or render at 300 dpi) | merged 2026-10-18 | #26 |
-| M5a GetComics + Anna's Archive (via Shelfmark) | on test, branch `m5-ddl`, no PR yet | — |
-| M5 rest: TPB links, Metron gaps page, GCD ratings, full tags at import (#24) | not started | — |
+| M5a GetComics + Anna's Archive (via Shelfmark) | merged 2026-10-20 | #27 |
+| M5b other sources: ComicVine refresh, move to Metron, add from ComicVine, reading direction, Metron gaps page | merged 2026-10-20 | #28 |
+| M5 rest: TPB links, GCD ratings, full tags at import (#24), manual series, split/join | not started | — |
 | M6 side-by-side week with Mylar, cut over | not started | — |
 
 ### Where M4 part 2 stands
@@ -125,12 +126,40 @@ Jinja2 + htmx. Image: `ghcr.io/majawat/fumora:edge` (built from `main`).
   DDoS-Guard CAPTCHA no bypasser can solve (byparr update didn't help; Shelfmark
   has no manual cookie import). Owner turned Shelfmark's Libgen search on: works.
 
+### Where M5b (other sources) stands
+
+Design: the doc's "Other metadata sources", "Moving a series to Metron", "Manga".
+
+- `comicvine.py`: ComicVine client (Mylar's key, `comicvine.api_key`), its own
+  RateLimiter (3/min, name "ComicVine"), 420/429/status 107 hold everything an
+  hour (`ComicVineRateLimited`), key never logged (it's a query parameter).
+- `sources.py`: daily ComicVine refresh (`cv_refresh` job, random per-install
+  time `schedule.cv_refresh_time`, batch `schedule.cv_refresh_batch`=30;
+  monitored series weekly, others monthly; fetches with no DB session open,
+  then re-checks the series still follows ComicVine). Monthly move-to-Metron
+  check runs inside the daily Metron refresh (10 series/day; errors and pauses
+  never fail the refresh): moves only if cv id + name/year/publisher + every
+  issue with a file pair 1:1 (cover dates within 92 days); else review with a
+  note starting "Metron has this ComicVine id". Accepting such a suggestion
+  moves it directly (no Mylar job); "Not on Metron" remembers the Metron id in
+  `Series.rejected_metron_ids` (the Mylar matcher honours it too).
+- Add page searches Metron or ComicVine; a ComicVine pick goes to Metron's add
+  page if Metron has that cv id. `/metron-gaps` lists ComicVine series and
+  rejected Metron matches (to report). Series page: Refresh from ComicVine,
+  Reading direction (writes ComicInfo `<Manga>`), numbering.
+- Migration 0009 (reading_direction, rejected_metron_ids, metron_checked).
+- **Live 2026-10-20 on fumora-test** (image `fumora:m5b`): ComicVine refresh of
+  5 series OK (20 s apart); Metron check: 3 absent, Trillium → review
+  ("Metron's name is 'Harbinger: Omegas'"), as designed. Test DB has the
+  ComicVine key from Mylar's config; Mieruko-chan (id 15) is source cv.
+  Helper: `/mnt/user/appdata/fumora-test/m5b_run.py cv|metron`.
+
 ## Deployments (Hathor, 192.168.9.10)
 
 | Container | Port | Image | Notes |
 | --- | --- | --- | --- |
 | `fumora` (production) | 8792 | `ghcr.io/majawat/fumora:edge` | `/data` mounted **read-only**; scheduler on (daily Metron refresh 05:00 UTC) |
-| `fumora-test` | 8793 | local `fumora:m5` (branch `m5-ddl`) | `FUMORA_SCHEDULER=0`; writable only `/data/media/comics-test` and `/data/usenet` (downloads + `fumora-test-library`) |
+| `fumora-test` | 8793 | local `fumora:m5b` (branch `m5b-sources`) | `FUMORA_SCHEDULER=0`; writable only `/data/media/comics-test` and `/data/usenet` (downloads + `fumora-test-library`) |
 
 Unraid templates: `/boot/config/plugins/dockerMan/templates-user/my-fumora.xml`
 and `my-fumora-test.xml`. Recreate containers with the same `docker run`

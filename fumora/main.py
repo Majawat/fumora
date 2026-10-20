@@ -13,6 +13,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import __version__, monitoring, settings_store
 from .auth import hash_password, load_or_create_secret, verify_password
 from .auto_search import SEARCH, make_search_handler
+from .comicvine import ComicVineClient, ComicVineError
+from .comicvine import make_limiter as make_cv_limiter
 from .config import Config, load_config
 from .db import make_engine, make_session_factory, upgrade_db
 from .ddl import DirectClient
@@ -27,6 +29,7 @@ from .models import Event, Issue, Series, User
 from .refresh import REFRESH, make_refresh_handler
 from .scheduler import ensure_refresh_time, run_download_monitor, run_scheduler
 from .shelfmark import ShelfmarkClient, ShelfmarkError
+from .sources import CV_REFRESH, make_cv_refresh_handler
 from .web.catalog_routes import register_catalog_routes
 from .web.library import register_library_routes
 from .web.library_admin import register_admin_routes
@@ -71,10 +74,19 @@ def create_app(config: Config | None = None) -> FastAPI:
     jobs.register(REFRESH, make_refresh_handler(make_metron_client))
     jobs.register(SEARCH, make_search_handler())
 
+    # ComicVine (series Metron doesn't have): its own limiter, same rules.
+    comicvine_limiter = make_cv_limiter()
+
+    def make_cv_client(api_key: str) -> ComicVineClient:
+        return ComicVineClient(api_key, comicvine_limiter)
+
+    jobs.register(CV_REFRESH, make_cv_refresh_handler(make_cv_client))
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         with SessionLocal() as db:
             ensure_refresh_time(db)
+            ensure_refresh_time(db, key="schedule.cv_refresh_time")
         jobs.resume_all()
         tasks = []
         if config.scheduler:
@@ -92,6 +104,8 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.state.session_factory = SessionLocal
     app.state.metron_limiter = metron_limiter
     app.state.make_metron_client = make_metron_client
+    app.state.comicvine_limiter = comicvine_limiter
+    app.state.make_cv_client = make_cv_client
     app.state.jobs = jobs
 
     templates = Jinja2Templates(directory=WEB_DIR / "templates")
@@ -263,6 +277,20 @@ def create_app(config: Config | None = None) -> FastAPI:
                 ok, message = False, str(exc)
             except Exception as exc:  # network errors
                 ok, message = False, f"Could not reach Metron: {type(exc).__name__}"
+        return templates.TemplateResponse(request, "_test_result.html", {"ok": ok, "message": message})
+
+    @app.post("/settings/test/comicvine", response_class=HTMLResponse)
+    async def test_comicvine(request: Request, db: Session = Depends(get_db)):
+        key = settings_store.get(db, "comicvine.api_key")
+        if not key:
+            ok, message = False, "Save a ComicVine API key first."
+        else:
+            try:
+                async with make_cv_client(key) as cv:
+                    await cv.check()
+                ok, message = True, "Connected."
+            except ComicVineError as exc:
+                ok, message = False, str(exc)
         return templates.TemplateResponse(request, "_test_result.html", {"ok": ok, "message": message})
 
     @app.post("/settings/test/getcomics", response_class=HTMLResponse)

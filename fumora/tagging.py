@@ -44,8 +44,11 @@ def issue_meta(issue: Issue) -> IssueMeta:
     ]
     notes = f"Tagged by Fumora {__version__} on {date.today().isoformat()}. " + " ".join(i for i in ids if i)
     web = d.get("resource_url") or (
-        f"https://metron.cloud/issue/{issue.metron_id}/" if issue.metron_id else None
+        f"https://metron.cloud/issue/{issue.metron_id}/"
+        if issue.metron_id
+        else (f"https://comicvine.gamespot.com/issue/4000-{cv_id}/" if cv_id else None)
     )
+    manga = {"rtl": "YesAndRightToLeft", "ltr": "No"}.get(series.reading_direction or "")
     return IssueMeta(
         series_name=series.name,
         series_year=series.year_began,
@@ -90,6 +93,7 @@ def issue_meta(issue: Issue) -> IssueMeta:
         cv_id=cv_id,
         gcd_id=gcd_id,
         web=web,
+        manga=manga,
         modified=d.get("modified"),
         notes=notes,
     )

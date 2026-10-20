@@ -24,6 +24,7 @@ from .importer import _parse_date, apply_metron_series, log, sync_series_issues
 from .jobs import JobContext
 from .metron import MetronAuthError, MetronClient, MetronError, MetronPause, _open
 from .models import Release, Series
+from .sources import run_metron_checks
 
 REFRESH = "refresh"
 DEFAULT_BATCH = 50
@@ -195,12 +196,27 @@ def make_refresh_handler(make_client):
                         log(db, f"Refresh failed for series {series_id}: {exc}", kind=REFRESH, level="error")
                         db.commit()
                 ctx.update(progress=n)
+            checks = None
+            if not explicit:
+                ctx.update(phase="metron-check", message="Looking for ComicVine series on Metron")
+                try:
+                    checks = await run_metron_checks(ctx, client)
+                except Exception as exc:  # noqa: BLE001 - the monthly check must not fail the refresh
+                    with sf() as db:
+                        log(db, f"Metron checks skipped today: {exc}", kind=REFRESH, level="error")
+                        db.commit()
+                ctx.update(message=None)
 
         summary = (
             f"Refreshed {totals['series']} series: {totals['new']} new issues, "
             f"{totals['stale']} issue records to re-fetch, {totals['errors']} errors"
             + (f"; {releases} scheduled releases" if not explicit else "")
         )
+        if checks and any(checks.values()):
+            summary += (
+                f"; ComicVine series checked on Metron: {checks['moved']} moved, "
+                f"{checks['review']} to review, {checks['absent'] + checks['rejected']} not there"
+            )
         with sf() as db:
             if not explicit:
                 settings_store.put_state(db, "refresh.last_success", started.isoformat())

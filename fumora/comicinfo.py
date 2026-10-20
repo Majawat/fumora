@@ -109,6 +109,8 @@ class IssueMeta:
     cv_id: int | None = None
     gcd_id: int | None = None
     web: str | None = None
+    # ComicInfo's <Manga>: "YesAndRightToLeft", "No", or None (not written).
+    manga: str | None = None
     modified: str | None = None
     notes: str | None = None
 
@@ -168,6 +170,7 @@ def comicinfo_fields(meta: IssueMeta) -> dict[str, str]:
         "StoryArc": _join(n for n, _ in meta.arcs),
         "AgeRating": meta.age_rating_comicinfo,
         "GTIN": meta.isbn or meta.upc,
+        "Manga": meta.manga,
     }
     # XML parsing turns \r\n into \n; normalise so a re-read compares equal.
     cleaned = {k: v.replace("\r\n", "\n").replace("\r", "\n").strip() for k, v in values.items() if v}

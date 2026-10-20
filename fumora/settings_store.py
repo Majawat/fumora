@@ -40,7 +40,8 @@ SETTINGS: list[SettingDef] = [
         "API key",
         "ComicVine",
         secret=True,
-        help="Fallback only, for series Metron does not have.",
+        help="For series Metron doesn't have (manga, some small press): their issue lists are kept "
+        "current from ComicVine until Metron has them. Mylar's key works.",
     ),
     SettingDef(
         "library.path",
@@ -126,6 +127,14 @@ SETTINGS += [
         "monthly; each costs 2-3 Metron requests (5,000 a day standard; Metron supporters get more).",
     ),
 ]
+
+SETTINGS += [
+    SettingDef("schedule.cv_refresh_time", "Daily ComicVine refresh (UTC, HH:MM)", "Schedule",
+               allow_empty=True,
+               help="Series Metron doesn't have. Picked at random on first start. Leave empty for off."),
+    SettingDef("schedule.cv_refresh_batch", "ComicVine series rechecked per day", "Schedule", default="30",
+               help="Monitored ones weekly, others monthly; one request each, about 20 s apart."),
+]  # fmt: skip
 
 SETTINGS += [
     SettingDef("prowlarr.url", "URL", "Indexers (Prowlarr)", help="e.g. http://192.168.9.10:9696"),

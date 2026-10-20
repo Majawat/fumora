@@ -10,31 +10,37 @@ from .auto_search import SEARCH
 from .grabbing import check_downloads
 from .models import Event, Setting
 from .refresh import REFRESH
+from .sources import CV_REFRESH
 
 log = logging.getLogger("fumora.scheduler")
 CHECK_EVERY = 300  # seconds
 
 
-def ensure_refresh_time(db, rng: random.Random | None = None) -> str | None:
-    """Give this install its own random daily refresh time (HH:MM UTC), once.
+_FIRST_PICK = {
+    "schedule.refresh_time": "Daily Metron refresh set to {at} UTC, picked at random so installs don't all "
+    "hit Metron at once (Metron's request; the old default was 05:00). Change it in Settings.",
+    "schedule.cv_refresh_time": "Daily ComicVine refresh set to {at} UTC, picked at random so installs "
+    "don't all hit ComicVine at once. Change it in Settings.",
+}
+
+
+def ensure_refresh_time(
+    db, rng: random.Random | None = None, key: str = "schedule.refresh_time"
+) -> str | None:
+    """Give this install its own random daily time (HH:MM UTC) for a refresh, once.
 
     Metron asked apps not to ship a fixed default time: every install would hit
-    it at the same moment. Saved like a normal setting, so it shows on the
-    Settings page and can be changed; an empty value (off) is left alone."""
-    if db.get(Setting, "schedule.refresh_time") is None:
+    it at the same moment (ComicVine gets the same courtesy). Saved like a normal
+    setting, so it shows on the Settings page and can be changed; an empty value
+    (off) is left alone."""
+    if db.get(Setting, key) is None:
         rng = rng or random.Random()
         at = f"{rng.randrange(24):02}:{rng.randrange(60):02}"
-        settings_store.put(db, "schedule.refresh_time", at)
-        db.add(
-            Event(
-                kind="settings",
-                message=f"Daily Metron refresh set to {at} UTC, picked at random so installs don't all "
-                "hit Metron at once (Metron's request; the old default was 05:00). Change it in Settings.",
-            )
-        )
+        settings_store.put(db, key, at)
+        db.add(Event(kind="settings", message=_FIRST_PICK[key].format(at=at)))
         db.commit()
-        log.info("daily Metron refresh time set to %s UTC", at)
-    return settings_store.get(db, "schedule.refresh_time")
+        log.info("%s set to %s UTC", key, at)
+    return settings_store.get(db, key)
 
 
 def due(now: datetime, at: str | None, last_run_day: str | None) -> bool:
@@ -100,6 +106,21 @@ async def run_scheduler(session_factory, jobs, check_every: int = CHECK_EVERY) -
                     db.commit()
                     jobs.start(REFRESH, {})
                     log.info("scheduled refresh started")
+                cv_at = settings_store.get(db, "schedule.cv_refresh_time")
+                cv_last = settings_store.get_state(db, "schedule.cv_refresh.last_day")
+                if cv_last is None:
+                    settings_store.put_state(db, "schedule.cv_refresh.last_day", now.date().isoformat())
+                    db.commit()
+                    cv_last = now.date().isoformat()
+                if (
+                    due(now, cv_at, cv_last)
+                    and settings_store.is_set(db, "comicvine.api_key")
+                    and jobs.active(CV_REFRESH) is None
+                ):
+                    settings_store.put_state(db, "schedule.cv_refresh.last_day", now.date().isoformat())
+                    db.commit()
+                    jobs.start(CV_REFRESH, {})
+                    log.info("scheduled ComicVine refresh started")
                 last_search = settings_store.get_state(db, "schedule.search.last")
                 if (
                     search_due(
