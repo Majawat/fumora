@@ -26,7 +26,7 @@
       {% if d.help %}<small>{{ d.help }}</small>{% endif %}
     </label>
     {% endfor %}
-    {% set test = {"Metron": "metron", "Direct downloads (GetComics)": "getcomics", "Anna's Archive (Shelfmark)": "shelfmark"}.get(group) %}
+    {% set test = {"Metron": "metron", "ComicVine": "comicvine", "Direct downloads (GetComics)": "getcomics", "Anna's Archive (Shelfmark)": "shelfmark"}.get(group) %}
     {% if test %}
     <div class="row">
       <button type="button" class="secondary" hx-post="/settings/test/{{ test }}" hx-target="#{{ test }}-test">Test {% if test != "metron" %}saved settings{% else %}connection{% endif %}</button>

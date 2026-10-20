@@ -3,12 +3,20 @@
 {% block content %}
 <h1>Add a series</h1>
 <form method="get" action="/add" class="row filters">
-  <input name="q" value="{{ q }}" placeholder="Series name, as on Metron" aria-label="Series name" autofocus>
-  <button>Search Metron</button>
+  <input name="q" value="{{ q }}" placeholder="Series name" aria-label="Series name" autofocus>
+  <select name="source" aria-label="Search">
+    <option value="metron" {% if source == "metron" %}selected{% endif %}>Metron</option>
+    <option value="cv" {% if source == "cv" %}selected{% endif %}>ComicVine (not on Metron)</option>
+  </select>
+  <button>Search</button>
 </form>
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
-{% if q and not results and not error %}<p class="muted">Nothing on Metron matches "{{ q }}". Missing series can be added on <a href="https://metron.cloud/" target="_blank" rel="noopener">metron.cloud</a>.</p>{% endif %}
-{% if results %}
+{% if q and not results and not error %}
+  {% if source == "metron" %}
+  <p class="muted">Nothing on Metron matches "{{ q }}". Missing series can be added on <a href="https://metron.cloud/" target="_blank" rel="noopener">metron.cloud</a>{% if cv_ready %}, or <a href="/add?source=cv&q={{ q|urlencode }}">search ComicVine</a> for now{% endif %}.</p>
+  {% else %}<p class="muted">Nothing on ComicVine matches "{{ q }}".</p>{% endif %}
+{% endif %}
+{% if results and source == "metron" %}
 <div class="scroll">
 <table class="log">
   <thead><tr><th>Series</th><th>Type</th><th>Issues</th><th></th></tr></thead>
@@ -25,5 +33,22 @@
 </table>
 </div>
 <p class="muted small">Showing up to 100 results; narrow the search if yours isn't listed.</p>
+{% elif results %}
+<p class="muted small">ComicVine is the fallback: a series Metron has is added from Metron instead (checked when you pick it). ComicVine series move to Metron by themselves once Metron has them and everything agrees.</p>
+<div class="scroll">
+<table class="log">
+  <thead><tr><th>Series</th><th>Start</th><th>Issues</th><th></th></tr></thead>
+  <tbody>
+  {% for r in results %}
+  <tr>
+    <td><a href="{{ r.site_detail_url }}" target="_blank" rel="noopener">{{ r.name }}</a><small class="muted why">{{ (r.publisher or {}).get('name', '') }}</small></td>
+    <td>{{ r.start_year or "" }}</td>
+    <td>{{ r.count_of_issues }}</td>
+    <td>{% if r.id in ours_cv %}<a href="/series/{{ ours_cv[r.id].id }}">In library</a>{% else %}<a class="button small" href="/add/cv/{{ r.id }}">Add</a>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
 {% endif %}
 {% endblock %}

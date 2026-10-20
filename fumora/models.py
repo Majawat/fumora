@@ -110,6 +110,14 @@ class Series(Base):
     # manga and digests, which ComicVine lists as issues), or 'auto' (volumes when
     # the issues are titled "Volume N", as ComicVine names manga volumes).
     numbering: Mapped[str] = mapped_column(String(10), default="auto", server_default="auto")
+    # 'rtl' = manga read right to left (ComicInfo <Manga>YesAndRightToLeft</Manga>),
+    # 'ltr' = explicitly not; None = unknown, nothing written.
+    reading_direction: Mapped[str | None] = mapped_column(String(3))
+    # Metron series the owner said are not this one (a wrong ComicVine id on Metron,
+    # or numbering that doesn't fit): never matched or suggested again.
+    rejected_metron_ids: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    # When a ComicVine-sourced series was last checked for a Metron equivalent.
+    metron_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Metron age-rating vocabulary; overrides the rating calculated from issues.
     age_rating_override: Mapped[str | None] = mapped_column(String(30))
     # Field names a user edited; a refresh never overwrites these.

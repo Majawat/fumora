@@ -71,7 +71,9 @@ class RateLimiter:
         sleep: Callable[[float], Any] = asyncio.sleep,
         min_interval: float | None = None,
         jitter: float = 0.2,
+        name: str = "Metron",
     ):
+        self.name = name  # for log lines: the same class paces ComicVine too
         self.per_minute = per_minute
         # Waits after errors grow by up to this fraction, at random (0 in tests).
         self.jitter = jitter
@@ -138,7 +140,11 @@ class RateLimiter:
         self.rejected += 1
         self.last_rejected = self._clock()
         self.block(retry_after if retry_after and retry_after > 0 else DEFAULT_RETRY_AFTER)
-        log.warning("Metron answered 429; holding all requests for %.0fs", self.blocked_until - self._clock())
+        log.warning(
+            "%s is rate-limiting; holding all its requests for %.0fs",
+            self.name,
+            self.blocked_until - self._clock(),
+        )
 
     def update(self, headers: httpx.Headers) -> None:
         def num(name: str) -> int | None:

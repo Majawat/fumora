@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Add {{ v.name }} · Fumora{% endblock %}
+{% block content %}
+<p><a href="/add?source=cv">← Search</a></p>
+<h1>{{ v.name }}{% if year %} ({{ year }}){% endif %}</h1>
+<p class="muted">Not on Metron: this series will follow ComicVine until Metron has it.</p>
+{% if metron_note %}<p class="error small">{{ metron_note }}</p>{% endif %}
+<dl class="facts">
+  <dt>Publisher</dt><dd>{{ (v.publisher or {}).get('name', '—') }}</dd>
+  <dt>Issues on ComicVine</dt><dd>{{ v.count_of_issues }}</dd>
+  <dt>ComicVine</dt><dd><a href="{{ v.site_detail_url }}" target="_blank" rel="noopener">{{ v.site_detail_url }}</a></dd>
+  <dt>Folder</dt><dd><code>{{ folder }}</code> <small class="muted">(created when the first file arrives)</small></dd>
+</dl>
+{% if v.deck %}<p class="muted">{{ v.deck }}</p>{% endif %}
+<form class="card" method="post" action="/add/cv/{{ v.id }}">
+  <label>Monitor
+    <select name="option">
+      {% for key, label in monitor_options.items() %}<option value="{{ key }}" {% if key == "future" %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    <small>Wanted = monitored, released, and no file. If the folder already exists, its files are linked first.</small>
+  </label>
+  <label class="inline"><input type="checkbox" name="monitor_new" value="true" checked> Monitor new issues as ComicVine adds them</label>
+  <p><button>Add series</button></p>
+</form>
+{% endblock %}

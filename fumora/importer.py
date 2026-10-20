@@ -139,12 +139,19 @@ def _parse_dt(value: str | None) -> datetime | None:
         return None
 
 
-def _upsert_publisher(db: Session, data: dict | None) -> Publisher | None:
+def _upsert_publisher(db: Session, data: dict | None, id_field: str = "metron_id") -> Publisher | None:
+    """The publisher with this Metron (or ComicVine: id_field='cv_id') id; a
+    same-name publisher without that id gets it."""
     if not data or data.get("id") is None:
         return None
-    pub = db.scalar(select(Publisher).where(Publisher.metron_id == data["id"]))
+    column = getattr(Publisher, id_field)
+    pub = db.scalar(select(Publisher).where(column == data["id"]))
+    if pub is None and data.get("name"):
+        pub = db.scalar(select(Publisher).where(Publisher.name == data["name"], column.is_(None)))
+        if pub is not None:
+            setattr(pub, id_field, data["id"])
     if pub is None:
-        pub = Publisher(metron_id=data["id"], name=data.get("name") or "")
+        pub = Publisher(name=data.get("name") or "", **{id_field: data["id"]})
         db.add(pub)
         db.flush()
     return pub
@@ -226,6 +233,7 @@ async def suggest_by_name(db: Session, client: MetronClient, series: Series) -> 
         and abs(r["year_began"] - series.year_began) <= 1
         and _name_key(re.sub(r"\s*\(\d{4}\)$", "", r.get("series") or "")) == key
         and _taken_by(db, r["id"], series) is None
+        and r["id"] not in (series.rejected_metron_ids or [])
     ]
     exact = [r for r in candidates if r["year_began"] == series.year_began]
     for group in (exact, candidates):
@@ -248,6 +256,8 @@ async def match_series(db: Session, client: MetronClient, series: Series) -> str
         note = "Matched by name and year (accepted)"
     else:
         found = await client.series_by_cv_id(series.cv_id) if series.cv_id is not None else None
+        if found is not None and found["id"] in (series.rejected_metron_ids or []):
+            found = None  # the owner said that Metron series isn't this one
         if found is None:
             series.suggested_metron_id = await suggest_by_name(db, client, series)
             if series.suggested_metron_id:
@@ -341,7 +351,8 @@ def unmatch_series(db: Session, series: Series, note: str) -> None:
     """Forget a Metron match: back to Mylar's name/year, drop Metron-only issues
     without files, clear Metron ids."""
     for issue in list(series.issues):
-        if issue.match_status == "new" and not issue.files:
+        # Only issues a Metron sync created (a ComicVine series' own new issues stay).
+        if issue.match_status == "new" and not issue.files and issue.metron_id is not None:
             series.issues.remove(issue)
             db.delete(issue)
         else:
@@ -359,6 +370,42 @@ def unmatch_series(db: Session, series: Series, note: str) -> None:
     db.flush()
 
 
+def listed_issue(
+    db: Session, series: Series, by_number: dict[str, Issue], number: str, release: date | None
+) -> tuple[Issue, bool]:
+    """Our issue with this number, or a new one (monitored by the series' "monitor
+    new issues" rule) when a source lists one we don't have. Returns (issue, created)."""
+    key = normalize_number(number)
+    issue = by_number.get(key)
+    if issue is not None:
+        return issue, False
+    added = series.added.date() if series.added else date.today()
+    issue = Issue(
+        series=series,
+        number=number or "",
+        monitored=new_issue_monitored(series, release, added),
+        match_status="new",
+        locked_fields=[],
+    )
+    db.add(issue)
+    by_number[key] = issue
+    return issue, True
+
+
+def apply_listed_values(issue: Issue, values: dict) -> bool:
+    """Copy a source's values onto an issue, skipping fields the user locked and
+    empty values. Returns whether anything changed."""
+    locked = set(issue.locked_fields or [])
+    changed = False
+    for field, value in values.items():
+        if field not in locked and value and getattr(issue, field) != value:
+            setattr(issue, field, value)
+            changed = True
+    issue.sort_number = sort_number(issue.number)
+    issue.last_synced = datetime.now(UTC)
+    return changed
+
+
 async def sync_series_issues(db: Session, client: MetronClient, series: Series) -> dict[str, int]:
     """Pair our issues with Metron's by number; add issues only Metron has."""
     counts = {"matched": 0, "new": 0, "unmatched": 0}
@@ -374,34 +421,16 @@ async def sync_series_issues(db: Session, client: MetronClient, series: Series) 
         clash = db.scalar(select(Issue).where(Issue.metron_id == mi["id"]))
         if clash is not None and (issue is None or clash.id != issue.id):
             continue
-        if issue is None:
-            store = _parse_date(mi.get("store_date"))
-            cover = _parse_date(mi.get("cover_date"))
-            added = series.added.date() if series.added else date.today()
-            issue = Issue(
-                series=series,
-                number=mi.get("number") or "",
-                monitored=new_issue_monitored(series, store or cover, added),
-                match_status="new",
-                locked_fields=[],
-            )
-            db.add(issue)
-            by_number[key] = issue
+        cover, store = _parse_date(mi.get("cover_date")), _parse_date(mi.get("store_date"))
+        issue, created = listed_issue(db, series, by_number, mi.get("number") or "", store or cover)
+        if created:
             counts["new"] += 1
         else:
             issue.match_status = "matched"
             counts["matched"] += 1
-        locked = set(issue.locked_fields or [])
         issue.metron_id = mi["id"]
-        issue.sort_number = sort_number(issue.number)
-        for field, value in (
-            ("cover_date", _parse_date(mi.get("cover_date"))),
-            ("store_date", _parse_date(mi.get("store_date"))),
-        ):
-            if field not in locked and value is not None:
-                setattr(issue, field, value)
+        apply_listed_values(issue, {"cover_date": cover, "store_date": store})
         issue.modified = _parse_dt(mi.get("modified"))
-        issue.last_synced = datetime.now(UTC)
         db.flush()
 
     for issue in series.issues:

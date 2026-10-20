@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Metron gaps · Fumora{% endblock %}
+{% block content %}
+<h1>Metron gaps</h1>
+<p class="muted">{{ rows|length }} series follow ComicVine because Metron doesn't have them (yet). Each one added on <a href="https://metron.cloud/" target="_blank" rel="noopener">metron.cloud</a> moves here to Metron by itself, once the ids, the series and every issue agree (checked monthly).</p>
+{% if rejected %}
+<h2>Rejected Metron matches ({{ rejected|length }})</h2>
+<p class="muted small">You said these Metron series aren't the one here. If Metron gives them this series' ComicVine id, that id is probably wrong on Metron and worth reporting.</p>
+<div class="scroll"><table class="log">
+  <thead><tr><th>Series here</th><th>ComicVine</th><th>Rejected on Metron</th></tr></thead>
+  <tbody>
+  {% for r in rejected %}{% set s = r.s %}
+  <tr>
+    <td><a href="/series/{{ s.id }}">{{ s.name }}</a>{% if s.year_began %} ({{ s.year_began }}){% endif %}</td>
+    <td>{% if s.cv_id %}<a href="https://comicvine.gamespot.com/x/4050-{{ s.cv_id }}/" target="_blank" rel="noopener">{{ s.cv_id }}</a>{% endif %}</td>
+    <td>{% for m in s.rejected_metron_ids %}<a href="https://metron.cloud/series/{{ m }}/" target="_blank" rel="noopener">{{ m }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+<h2>Not on Metron</h2>
+<div class="scroll"><table class="log">
+  <thead><tr><th>Series</th><th>Publisher</th><th>Issues (with files)</th><th>ComicVine</th><th>Metron check</th></tr></thead>
+  <tbody>
+  {% for r in rows %}{% set s = r.s %}
+  <tr>
+    <td><a href="/series/{{ s.id }}">{{ s.name }}</a>{% if s.year_began %} ({{ s.year_began }}){% endif %}{% if s.monitored %} <small class="muted">monitored</small>{% endif %}</td>
+    <td>{{ s.publisher.name if s.publisher else "" }}</td>
+    <td>{{ r.issues }} ({{ r.files }})</td>
+    <td>{% if s.cv_id %}<a href="https://comicvine.gamespot.com/x/4050-{{ s.cv_id }}/" target="_blank" rel="noopener">{{ s.cv_id }}</a>{% else %}<span class="muted">none</span>{% endif %}</td>
+    <td>{% if s.suggested_metron_id %}<a href="/series/{{ s.id }}">suggestion to review</a>{% elif s.metron_checked %}{{ s.metron_checked.strftime('%Y-%m-%d') }}{% else %}<span class="muted">not yet</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endblock %}

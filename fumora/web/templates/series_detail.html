@@ -65,6 +65,14 @@
     </select>
     <small>Manga volumes are listed as issues (ComicVine "Volume 12" = issue 12). Volume numbering also uses the collected-edition size limit.</small>
   </label>
+  <label>Reading direction
+    <select name="reading_direction">
+      <option value="" {% if not s.reading_direction %}selected{% endif %}>Not set (nothing written)</option>
+      <option value="ltr" {% if s.reading_direction == "ltr" %}selected{% endif %}>Left to right</option>
+      <option value="rtl" {% if s.reading_direction == "rtl" %}selected{% endif %}>Right to left (manga)</option>
+    </select>
+    <small>Written to ComicInfo &lt;Manga&gt; (YesAndRightToLeft / No); Komga and Kavita use it for page order.</small>
+  </label>
   <button>Save</button>
 </form>
 
@@ -89,6 +97,7 @@
   <div class="row">
     <form method="post" action="/series/{{ s.id }}/scan"><button class="secondary" {% if running %}disabled{% endif %}>Scan folder</button></form>
     {% if s.metron_id %}<form method="post" action="/series/{{ s.id }}/refresh"><button class="secondary" {% if running %}disabled{% endif %}>Refresh from Metron</button></form>{% endif %}
+    {% if s.source == "cv" and s.cv_id %}<form method="post" action="/series/{{ s.id }}/refresh-cv"><button class="secondary" {% if running %}disabled{% endif %}>Refresh from ComicVine</button></form>{% endif %}
     <form method="post" action="/series/{{ s.id }}/retag"><button class="secondary" {% if running %}disabled{% endif %}>Preview tags</button></form>
     <form method="post" action="/series/{{ s.id }}/retag"><input type="hidden" name="write" value="true"><button {% if running or not writable %}disabled{% endif %}>Write tags</button></form>
     <a class="button secondary" href="/series/{{ s.id }}?rename=1">Preview rename</a>

@@ -11,9 +11,11 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import monitoring, settings_store
 from ..catalog import add_series, folder_for
+from ..comicvine import ComicVineError, start_year
 from ..metron import MetronError
 from ..models import Issue, Publisher, Release, Series
 from ..refresh import REFRESH, week_start
+from ..sources import add_cv_series, gap_counts
 
 
 def register_catalog_routes(app: FastAPI, templates: Jinja2Templates, get_db) -> None:
@@ -97,19 +99,105 @@ def register_catalog_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
         app.state.jobs.start(REFRESH, {"series_ids": [series_id]})
         return RedirectResponse(f"/series/{series_id}", status_code=303)
 
+    def _cv(db: Session):
+        key = settings_store.get(db, "comicvine.api_key")
+        if not key:
+            raise HTTPException(400, "Save a ComicVine API key in Settings first.")
+        return app.state.make_cv_client(key)
+
     @app.get("/add", response_class=HTMLResponse)
-    async def add_search(request: Request, q: str = "", db: Session = Depends(get_db)):
+    async def add_search(
+        request: Request, q: str = "", source: str = "metron", db: Session = Depends(get_db)
+    ):
         results, error = [], None
+        source = "cv" if source == "cv" else "metron"
         if q.strip():
             try:
-                async with _client(db) as client:
-                    results = await client.search_series(q.strip(), max_pages=1)
-            except MetronError as exc:
+                if source == "cv":
+                    async with _cv(db) as cv:
+                        results = await cv.search_volumes(q.strip())
+                else:
+                    async with _client(db) as client:
+                        results = await client.search_series(q.strip(), max_pages=1)
+            except (MetronError, ComicVineError) as exc:
                 error = str(exc)
         ours = {s.metron_id: s for s in db.scalars(select(Series).where(Series.metron_id.is_not(None)))}
+        ours_cv = {s.cv_id: s for s in db.scalars(select(Series).where(Series.cv_id.is_not(None)))}
         return templates.TemplateResponse(
-            request, "add.html", {"q": q, "results": results, "ours": ours, "error": error}
+            request,
+            "add.html",
+            {"q": q, "source": source, "results": results, "ours": ours, "ours_cv": ours_cv,
+             "error": error, "cv_ready": settings_store.is_set(db, "comicvine.api_key")},
+        )  # fmt: skip
+
+    @app.get("/metron-gaps", response_class=HTMLResponse)
+    def metron_gaps(request: Request, db: Session = Depends(get_db)):
+        """Series Fumora follows from ComicVine: candidates to add to Metron (#14),
+        and Metron series the owner rejected, whose ComicVine id may be wrong there."""
+        series = db.scalars(
+            select(Series)
+            .where(Series.source == "cv")
+            .options(selectinload(Series.publisher))
+            .order_by(Series.monitored.desc(), Series.sort_name, Series.name)
+        ).all()
+        counts = gap_counts(db)
+        rows = [
+            {"s": s, "issues": counts.get(s.id, (0, 0))[0], "files": counts.get(s.id, (0, 0))[1]}
+            for s in series
+        ]
+        rejected = [r for r in rows if r["s"].rejected_metron_ids]
+        return templates.TemplateResponse(request, "metron_gaps.html", {"rows": rows, "rejected": rejected})
+
+    @app.get("/add/cv/{cv_id}", response_class=HTMLResponse)
+    async def add_cv_form(request: Request, cv_id: int, db: Session = Depends(get_db)):
+        existing = db.scalar(select(Series).where(Series.cv_id == cv_id))
+        if existing is not None:
+            return RedirectResponse(f"/series/{existing.id}", status_code=303)
+        # Metron first: if it has this series, add it from there. Best effort:
+        # without Metron (no login, paused) the ComicVine add still works.
+        metron_note = None
+        try:
+            async with _client(db) as client:
+                on_metron = await client.series_by_cv_id(cv_id)
+            if on_metron is not None:
+                return RedirectResponse(f"/add/{on_metron['id']}", status_code=303)
+        except (HTTPException, MetronError) as exc:
+            metron_note = f"Couldn't check Metron first ({getattr(exc, 'detail', None) or exc})."
+        try:
+            async with _cv(db) as cv:
+                vol = await cv.volume(cv_id)
+        except ComicVineError as exc:
+            raise HTTPException(502, str(exc)) from exc
+        if vol is None:
+            raise HTTPException(404, "ComicVine has no such volume")
+        pub = (vol.get("publisher") or {}).get("name")
+        year = start_year(vol)
+        preview = Series(
+            name=vol.get("name") or "", year_began=year, publisher=Publisher(name=pub) if pub else None
         )
+        return templates.TemplateResponse(
+            request,
+            "add_cv_form.html",
+            {"v": vol, "year": year, "folder": folder_for(db, preview), "metron_note": metron_note},
+        )
+
+    @app.post("/add/cv/{cv_id}")
+    async def add_cv_submit(
+        cv_id: int,
+        option: str = Form("future"),
+        monitor_new: bool = Form(False),
+        db: Session = Depends(get_db),
+    ):
+        if option not in monitoring.OPTIONS:
+            raise HTTPException(400, "Unknown monitor option")
+        try:
+            async with _cv(db) as cv:
+                series = await add_cv_series(db, cv, cv_id, option, monitor_new)
+            db.commit()
+        except ComicVineError as exc:
+            db.rollback()
+            raise HTTPException(502, str(exc)) from exc
+        return RedirectResponse(f"/series/{series.id}", status_code=303)
 
     @app.get("/add/{metron_id}", response_class=HTMLResponse)
     async def add_form(request: Request, metron_id: int, db: Session = Depends(get_db)):
