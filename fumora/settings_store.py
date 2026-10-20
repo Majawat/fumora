@@ -25,7 +25,15 @@ class SettingDef:
 
 
 SETTINGS: list[SettingDef] = [
-    SettingDef("metron.username", "Username", "Metron"),
+    SettingDef(
+        "metron.api_token",
+        "API token",
+        "Metron",
+        secret=True,
+        help="Recommended. On metron.cloud: your profile, API Tokens, Generate Token (shown once). "
+        "Used instead of the username and password, which Metron is phasing out for apps.",
+    ),
+    SettingDef("metron.username", "Username", "Metron", help="Only needed without an API token."),
     SettingDef("metron.password", "Password", "Metron", secret=True),
     SettingDef(
         "comicvine.api_key",
@@ -103,10 +111,11 @@ SETTINGS += [
         "schedule.refresh_time",
         "Daily Metron refresh (UTC, HH:MM)",
         "Schedule",
-        default="05:00",
         allow_empty=True,
         help="Fetches Metron's release schedule, refreshes series with new issues, then a batch "
-        "of others. Reads only; it doesn't touch files. Leave empty to turn it off.",
+        "of others. Reads only; it doesn't touch files. Picked at random on first start, so "
+        "installs don't all hit Metron at the same moment (Metron's request). "
+        "Leave empty to turn it off.",
     ),
     SettingDef(
         "schedule.refresh_batch",
@@ -114,7 +123,7 @@ SETTINGS += [
         "Schedule",
         default="50",
         help="Besides series with releases this week. Ongoing series are rechecked weekly, ended ones "
-        "monthly; each costs 2-3 Metron requests (5,000 a day allowed).",
+        "monthly; each costs 2-3 Metron requests (5,000 a day standard; Metron supporters get more).",
     ),
 ]
 
@@ -129,11 +138,17 @@ SETTINGS += [
     SettingDef("quality.ignore_words", "Ignore releases containing", "Quality",
                default=".exe, .iso, pdf-xpost, preview, sample", allow_empty=True,
                help="Comma-separated. Ebooks (EPUB, AZW3...) are recognised and skipped anyway."),
+    SettingDef("search.languages", "Languages", "Quality", default="en",
+               help="Comma-separated codes, e.g. en or en, fr. Releases in these are grabbed normally."),
+    SettingDef("search.other_languages", "Other languages", "Quality", default="ask",
+               choices=(("ask", "ask me (held on the Queue page until you OK it)"),
+                        ("reject", "never grab"))),
     SettingDef("quality.preferred_groups", "Preferred groups", "Quality",
                help="Comma-separated, e.g. Empire, DCP. Scores higher; never required."),
     SettingDef("quality.blocked_groups", "Blocked groups", "Quality", help="Comma-separated; never grabbed."),
-    SettingDef("quality.protocols", "Protocols, in order", "Quality", default="usenet, torrent",
-               help="Remove one to never use it. Source ranking is fixed: digital, HD-Upscaled, then scans."),
+    SettingDef("quality.protocols", "Protocols, in order", "Quality", default="usenet, torrent, ddl",
+               help="ddl = direct downloads (GetComics, Anna's Archive). Remove one to never use it. "
+               "Source ranking is fixed: digital, HD-Upscaled, then scans."),
 ]  # fmt: skip
 
 SETTINGS += [
@@ -146,12 +161,32 @@ SETTINGS += [
     SettingDef("qbittorrent.password", "Password", "Torrents (qBittorrent)", secret=True),
     SettingDef("qbittorrent.category", "Category", "Torrents (qBittorrent)", default="fumora",
                help="Torrents are hardlinked into the library and keep seeding."),
+    SettingDef("getcomics.enabled", "Search GetComics", "Direct downloads (GetComics)", default="off",
+               choices=(("off", "off"), ("on", "on"))),
+    SettingDef("getcomics.url", "URL", "Direct downloads (GetComics)", default="https://getcomics.org"),
+    SettingDef("flaresolverr.url", "FlareSolverr / byparr URL (optional)", "Direct downloads (GetComics)",
+               help="Only used when GetComics shows a Cloudflare challenge, e.g. http://192.168.9.10:8191"),
+    SettingDef("ddl.path", "Download folder", "Direct downloads (GetComics)",
+               default="/data/downloads/fumora",
+               help="Fumora downloads GetComics files here itself (main server, then Pixeldrain). "
+               "Keep it on the same /data mount as the library so imports are a rename."),
+    SettingDef("shelfmark.url", "URL", "Anna's Archive (Shelfmark)",
+               help="e.g. http://192.168.9.10:8084. Shelfmark searches Anna's Archive and downloads; "
+               "Fumora imports the file from Shelfmark's folder (same /data mount)."),
+    SettingDef("shelfmark.api_key", "API key (optional)", "Anna's Archive (Shelfmark)", secret=True,
+               help="Only if Shelfmark has a login: its SHELFMARK_API_KEY."),
+    SettingDef("shelfmark.sources", "Shelfmark sources", "Anna's Archive (Shelfmark)",
+               default="direct_download",
+               help="direct_download = Anna's Archive. Add libgen if Shelfmark's Libgen search is on "
+               "(it has more CBZ/CBR comics)."),
     SettingDef("search.auto", "Search Wanted automatically", "Search", default="off",
                choices=(("off", "off (search by hand)"), ("on", "on"))),
     SettingDef("search.interval_hours", "Every (hours)", "Search", default="6"),
     SettingDef("search.delay_hours", "Wait after release (hours)", "Search", default="0",
                help="Give a digital release time to appear before settling for something else."),
-    SettingDef("import.tag", "Tag usenet imports", "Search", default="on",
+    SettingDef("search.retry_failed", "When a download fails", "Search", default="on",
+               choices=(("on", "search again for that issue (up to 5 times a day)"), ("off", "do nothing"))),
+    SettingDef("import.tag", "Tag usenet and direct-download imports", "Search", default="on",
                choices=(("on", "on (confirmed series only)"), ("off", "off"))),
     SettingDef("import.tag_torrents", "Tag torrent imports", "Search", default="off",
                choices=(("off", "off (keeps the hardlink: no extra disk space while seeding)"),
@@ -159,6 +194,20 @@ SETTINGS += [
 ]  # fmt: skip
 
 SETTINGS_BY_KEY = {s.key: s for s in SETTINGS}
+
+
+def metron_login(db: Session) -> tuple[str | None, str | None, str | None]:
+    """(username, password, token) for Metron; usable if there's a token or both of the others."""
+    return get(db, "metron.username"), get(db, "metron.password"), get(db, "metron.api_token")
+
+
+def metron_usable(user: str | None, password: str | None, token: str | None) -> bool:
+    """A token, or a username with its password (until Metron drops those)."""
+    return bool(token or (user and password))
+
+
+def metron_ready(db: Session) -> bool:
+    return metron_usable(*metron_login(db))
 
 
 def get_state(db: Session, key: str) -> str | None:

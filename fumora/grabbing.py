@@ -1,13 +1,14 @@
 """Grabbing releases, following downloads, importing finished ones (M4 part 2).
 
 Import rules (TRaSH layout: downloads and library share one /data mount):
-- usenet downloads are moved into the library (a rename on the same disk);
+- usenet and direct downloads (GetComics, Shelfmark) are moved into the library
+  (a rename on the same disk);
 - torrent downloads are hardlinked, so they keep seeding (private trackers);
 - never a silent copy across mounts: if a rename/hardlink isn't possible, the
   import fails with a message saying the mounts need fixing;
 - CBR/CB7/CBT/PDF are converted into a new CBZ in the series folder; the download
   itself is left untouched until the CBZ is safely in place;
-- the file is named by the naming template and, for usenet imports, tagged
+- the file is named by the naming template and, unless it's a torrent, tagged
   (confirmed series only). Tagging a torrent import would rewrite the file and
   break its hardlink, doubling disk use, so that is a separate setting, off;
 - an issue that already has a file is never overwritten.
@@ -20,14 +21,15 @@ import logging
 import os
 import shutil
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from . import convert, naming, settings_store
 from .catalog import folder_for
+from .ddl import DirectClient
 from .downloaders import DownloaderError, QbittorrentClient, SabnzbdClient
 from .importer import log
 from .library_jobs import naming_settings
@@ -35,10 +37,12 @@ from .models import Blocklist, File, Grab, Issue, Series
 from .numbers import normalize_number
 from .scanner import COMIC_EXTS, parse_issue_number
 from .search import Candidate
+from .shelfmark import ShelfmarkClient
 from .tagging import tag_file
 
 logger = logging.getLogger("fumora.grabbing")
 ACTIVE = ("queued", "downloading", "importing")
+APPROVAL = "approval"  # found, but waiting for the owner's OK (e.g. another language)
 IMPORT_EXTS = COMIC_EXTS  # PDFs included: converted to CBZ on import
 # Folder names a cleanup must never remove, whatever the client reports.
 PROTECTED_DIRS = {"complete", "completed", "incomplete", "downloads", "usenet", "torrents", "data", "fumora"}
@@ -50,20 +54,27 @@ class ImportFailed(Exception):
     """An import that can't go ahead (explained in the message)."""
 
 
-def client_for(db: Session, protocol: str):
-    """The configured download client for a protocol, or None."""
-    if protocol == "usenet":
-        url, key = settings_store.get(db, "sabnzbd.url"), settings_store.get(db, "sabnzbd.api_key")
-        if url and key:
-            return SabnzbdClient(url, key, settings_store.get(db, "sabnzbd.category") or "fumora")
-    elif protocol == "torrent":
-        url = settings_store.get(db, "qbittorrent.url")
-        user = settings_store.get(db, "qbittorrent.username")
-        pw = settings_store.get(db, "qbittorrent.password")
-        if url and user and pw:
-            return QbittorrentClient(
-                url, user, pw, settings_store.get(db, "qbittorrent.category") or "fumora"
+DEFAULT_CLIENT = {"usenet": "sabnzbd", "torrent": "qbittorrent", "ddl": "getcomics"}
+
+
+def client_for(db: Session, protocol: str, name: str | None = None):
+    """The configured download client for a release (by its client name or protocol), or None."""
+    get = lambda k: settings_store.get(db, k)  # noqa: E731
+    name = name or DEFAULT_CLIENT.get(protocol)
+    if name == "sabnzbd":
+        if get("sabnzbd.url") and get("sabnzbd.api_key"):
+            return SabnzbdClient(
+                get("sabnzbd.url"), get("sabnzbd.api_key"), get("sabnzbd.category") or "fumora"
             )
+    elif name == "qbittorrent":
+        url, user, pw = get("qbittorrent.url"), get("qbittorrent.username"), get("qbittorrent.password")
+        if url and user and pw:
+            return QbittorrentClient(url, user, pw, get("qbittorrent.category") or "fumora")
+    elif name == "getcomics":
+        return DirectClient(get("ddl.path"), get("getcomics.url"), get("flaresolverr.url"))
+    elif name == "shelfmark":
+        if get("shelfmark.url"):
+            return ShelfmarkClient(get("shelfmark.url"), get("shelfmark.api_key"))
     return None
 
 
@@ -106,27 +117,32 @@ def covered_issues(c: Candidate, issue: Issue) -> list[int]:
 
 
 def active_grab(db: Session, issue_id: int) -> Grab | None:
-    for g in db.scalars(select(Grab).where(Grab.state.in_(ACTIVE))):
+    """A download under way for this issue, or a release waiting for the owner's OK."""
+    for g in db.scalars(select(Grab).where(Grab.state.in_((*ACTIVE, APPROVAL)))):
         if issue_id in (g.issue_ids or []) or g.issue_id == issue_id:
             return g
     return None
 
 
-async def grab(db: Session, c: Candidate, issue: Issue) -> Grab:
-    """Send a release to its download client and start following it.
-
-    Nothing is recorded unless the client accepted it."""
-    client = client_for(db, c.protocol)
+async def send(db: Session, g: Grab) -> None:
+    """Hand a grab's release to its download client; raises DownloaderError if it won't take it."""
+    client = client_for(db, g.protocol, g.client)
     if client is None:
-        raise DownloaderError(f"No {c.protocol} download client is set up (Settings)")
-    url = c.release.get("downloadUrl") or c.release.get("magnetUrl")
-    if not url:
+        raise DownloaderError(f"No {g.protocol} download client is set up (Settings)")
+    if not g.download_url:
         raise DownloaderError("This release has no download link")
     async with client:
-        if c.protocol == "usenet":
-            job_id = await client.add(url, c.parsed.title)
+        if g.protocol == "torrent":
+            g.client_job_id = await client.add(g.download_url, f"fumora-{uuid.uuid4().hex[:12]}")
         else:
-            job_id = await client.add(url, f"fumora-{uuid.uuid4().hex[:12]}")
+            g.client_job_id = await client.add(g.download_url, g.release_title)
+    g.state = "downloading"
+
+
+async def grab(db: Session, c: Candidate, issue: Issue, approval: bool = False) -> Grab:
+    """Send a release to its download client and start following it; nothing is
+    recorded unless the client accepted it. With approval=True (a release only
+    held back by the language setting) it waits on the Queue page for an OK."""
     g = Grab(
         issue_id=issue.id,
         issue_ids=covered_issues(c, issue),
@@ -134,17 +150,22 @@ async def grab(db: Session, c: Candidate, issue: Issue) -> Grab:
         indexer=c.release.get("indexer") or "",
         release_title=_clean_title(c.release.get("title")),
         guid=c.release.get("guid"),
-        download_url=url,
+        download_url=c.release.get("downloadUrl") or c.release.get("magnetUrl"),
         protocol=c.protocol,
         size=c.release.get("size"),
         score=c.score,
         source=c.parsed.source,
-        client="sabnzbd" if c.protocol == "usenet" else "qbittorrent",
-        client_job_id=job_id,
-        state="downloading",
+        client=c.release.get("client") or DEFAULT_CLIENT.get(c.protocol),
+        state=APPROVAL,
     )
-    db.add(g)
-    log(db, f"Grabbed '{g.release_title}' ({c.protocol}, {g.indexer})", kind="grab", issue_id=issue.id)
+    if approval:
+        g.message = f"Needs your OK ({c.hold})"
+        db.add(g)
+        log(db, f"Holding '{g.release_title}' for your OK: {c.hold}", kind="grab", issue_id=issue.id)
+    else:
+        await send(db, g)
+        db.add(g)
+        log(db, f"Grabbed '{g.release_title}' ({c.protocol}, {g.indexer})", kind="grab", issue_id=issue.id)
     db.flush()
     return g
 
@@ -267,7 +288,7 @@ def import_grab(db: Session, g: Grab, path: str) -> str:
             continue
         if convert.needs_conversion(f):
             placed = _place_converted(f, dest)
-            if g.protocol == "usenet":
+            if g.protocol != "torrent":  # a torrent keeps seeding its original
                 f.unlink(missing_ok=True)  # the download's own copy, now converted
         else:
             placed = _place(f, dest, g.protocol)
@@ -278,8 +299,9 @@ def import_grab(db: Session, g: Grab, path: str) -> str:
             tag_file(issue, row, dry_run=False, recycle_dir=recycle)
             db.commit()
         imported.append(f"#{issue.number}")
-    if g.protocol == "usenet" and imported:
-        _remove_download_folder(path, settings_store.get(db, "sabnzbd.category") or "fumora")
+    client = client_for(db, g.protocol, g.client)
+    if imported and getattr(client, "owns_job_folders", False):
+        _remove_download_folder(path, client.category)
     summary = f"Imported {', '.join(imported) or 'nothing'}" + (
         f"; skipped: {'; '.join(skipped)}" if skipped else ""
     )
@@ -305,9 +327,30 @@ def _import_in_thread(session_factory, grab_id: int, path: str) -> None:
         db.commit()
 
 
-async def check_downloads(session_factory) -> int:
-    """Poll active grabs; import finished ones. Returns how many changed state."""
+MAX_RETRIES_PER_DAY = 5  # failed downloads of one issue that start a new search, per day
+
+
+def retry_candidates(db: Session, g: Grab) -> list[int]:
+    """Issues of a failed grab that should be searched again right away: the next
+    best release (the failed one is blocklisted) may well work, e.g. Libgen has
+    many dead copies. Capped per issue and day so a run of failures can't loop."""
+    if (settings_store.get(db, "search.retry_failed") or "on") != "on" or not g.issue_id:
+        return []
+    since = datetime.now(UTC) - timedelta(days=1)
+    failures = db.scalar(
+        select(func.count())
+        .select_from(Grab)
+        .where(Grab.issue_id == g.issue_id, Grab.state == "failed", Grab.created >= since)
+    )
+    return list(dict.fromkeys(g.issue_ids or [g.issue_id])) if failures <= MAX_RETRIES_PER_DAY else []
+
+
+async def check_downloads(session_factory, on_failed=None) -> int:
+    """Poll active grabs; import finished ones. Returns how many changed state.
+    on_failed(issue_ids) is called with issues whose download failed and that
+    should be searched again (see retry_candidates)."""
     changed = 0
+    retry: list[int] = []
     with session_factory() as db:
         grabs = db.scalars(select(Grab).where(Grab.state.in_(ACTIVE))).all()
         clients: dict[str, object] = {}
@@ -324,12 +367,14 @@ async def check_downloads(session_factory) -> int:
                         _importing.discard(g.id)
                     changed += 1
                     continue
-                client = clients.get(g.protocol)
+                client = clients.get(g.client)
                 if client is None:
-                    client = client_for(db, g.protocol)
-                    if client is None or not g.client_job_id:
+                    client = client_for(db, g.protocol, g.client)
+                    if client is None:
                         continue
-                    clients[g.protocol] = client
+                    clients[g.client] = client
+                if not g.client_job_id:
+                    continue
                 try:
                     st = await client.status(g.client_job_id)
                 except DownloaderError as exc:
@@ -347,10 +392,23 @@ async def check_downloads(session_factory) -> int:
                         await asyncio.to_thread(_import_in_thread, session_factory, g.id, st.path or "")
                     finally:
                         _importing.discard(g.id)
+                    if hasattr(client, "forget"):
+                        client.forget(g.client_job_id)
                     changed += 1
+                elif st.state == "missing" and getattr(client, "restartable", False) and g.download_url:
+                    # Fumora's own downloads stop when it restarts: start it again.
+                    try:
+                        await client.add(g.download_url, g.release_title, job_id=g.client_job_id)
+                        g.state, g.progress, g.message = "queued", 0.0, "Restarted after Fumora restarted"
+                    except DownloaderError as exc:
+                        g.state, g.message, g.finished = "failed", str(exc), datetime.now(UTC)
+                    db.commit()
                 elif st.state in ("failed", "missing"):
                     g.state, g.message, g.finished = "failed", st.message, datetime.now(UTC)
                     blocklist(db, g, st.message or "download failed")
+                    if hasattr(client, "forget"):
+                        client.forget(g.client_job_id)
+                    retry += retry_candidates(db, g)
                     log(
                         db, f"Download failed: '{g.release_title}' ({st.message})", kind="grab", level="error"
                     )
@@ -359,4 +417,6 @@ async def check_downloads(session_factory) -> int:
         finally:
             for client in clients.values():
                 await client.__aexit__(None, None, None)
+    if retry and on_failed is not None:
+        on_failed(sorted(set(retry)))
     return changed

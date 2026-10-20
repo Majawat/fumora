@@ -70,4 +70,4 @@ def test_unknown_setting_keys_are_ignored(logged_in, app):
 
 def test_metron_test_without_credentials(logged_in):
     r = logged_in.post("/settings/test/metron")
-    assert "Save a Metron username and password first." in r.text
+    assert "Save a Metron API token (or username and password) first." in r.text

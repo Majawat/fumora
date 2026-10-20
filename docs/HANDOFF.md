@@ -1,6 +1,6 @@
 # Fumora — handoff
 
-State as of 2026-10-17. Read this, `CLAUDE.md` (coding rules) and the design doc
+State as of 2026-10-19. Read this, `CLAUDE.md` (coding rules) and the design doc
 (link in `docs/DESIGN.md`) before continuing.
 
 ## What Fumora is
@@ -26,9 +26,10 @@ Jinja2 + htmx. Image: `ghcr.io/majawat/fumora:edge` (built from `main`).
 | M3 monitoring, daily refresh, releases, add series | merged | #21 |
 | Metron rate limiting (after Metron's warning) | merged | #22 |
 | M4 part 1: release parser, Prowlarr search, decisions | merged | #23 |
-| **M4 part 2: grab, download monitor, import** | **PR open, awaiting owner merge** | #25 |
-| PDF → CBZ (extract page images or render at 300 dpi) | PR open, stacked on #25 | #26 |
-| M5 GetComics, Anna's Archive (via Shelfmark), TPB links, Metron gaps page, GCD ratings | not started | — |
+| M4 part 2: grab, download monitor, import | merged 2026-10-18 | #25 |
+| PDF → CBZ (extract page images or render at 300 dpi) | merged 2026-10-18 | #26 |
+| M5a GetComics + Anna's Archive (via Shelfmark) | on test, branch `m5-ddl`, no PR yet | — |
+| M5 rest: TPB links, Metron gaps page, GCD ratings, full tags at import (#24) | not started | — |
 | M6 side-by-side week with Mylar, cut over | not started | — |
 
 ### Where M4 part 2 stands
@@ -55,22 +56,89 @@ Jinja2 + htmx. Image: `ghcr.io/majawat/fumora:edge` (built from `main`).
   be hardlinked and keep seeding; tagging torrent imports is off by default
   because rewriting the file breaks the hardlink.
 
-**Next:** owner merges M4 part 2; then production needs `/data` read-write
+**Next:** production needs `/data` read-write
 (owner's OK) before it can import or write tags; then M5.
+
+### Where M5a (direct downloads) stands
+
+- `getcomics.py`: own GetComics indexer. Search page → posts whose title is for
+  the wanted series/issues (`search.wants`) → post page → one release per
+  group (name + size line, then host buttons). Titles come from the real file
+  name in a host link when there is one (gives source + group). Paced 1 req/s,
+  ≤ 8 posts per search; FlareSolverr/byparr only if Cloudflare challenges.
+- `ddl.py`: Fumora downloads GetComics files itself (main server, then
+  Pixeldrain; other hosts skipped), into `ddl.path/<job>/`, unpacks packs of
+  CBZ/CBR. Jobs are in memory; after a restart the monitor restarts them.
+  Remove / Try another cancels a running one.
+- `shelfmark.py`: Anna's Archive via Shelfmark's API (`/api/releases`,
+  `/api/releases/download`, `/api/status`); file imported from Shelfmark's
+  folder. Shelfmark on Hathor has AUTH_METHOD=none, so no key needed.
+- `indexers.py`: Prowlarr + GetComics + Shelfmark behind one search call; a
+  failing source is reported, the others still count. New protocol `ddl`
+  (migration 0007 adds it to a saved protocol list).
+- **Live-tested 2026-10-19 on fumora-test** (local image `fumora:m5`):
+  Absolute Batman #21-23 grabbed from GetComics, downloaded (~0.5 MB/s from
+  the main server), imported, tagged, job folder removed; #22 went through the
+  restart path. Test settings: `getcomics.enabled=on`,
+  `ddl.path=/data/usenet/fumora-ddl` (same mount as the test library),
+  `flaresolverr.url=http://192.168.9.10:8191`, `shelfmark.url=http://192.168.9.10:8084`.
+  Helper: `/mnt/user/appdata/fumora-test/m5run.py "<series>" <number> [getcomics]`
+  (run with `docker exec -u 99:100`; the app's own monitor does the download).
+- **Also on the branch (2026-10-19, owner asks):**
+  - Metron API token (`metron.api_token`, Bearer; username/password still a
+    fallback until Metron drops Basic auth). Owner must generate a token on
+    metron.cloud and save it in prod + test Settings.
+  - Daily Metron refresh time is random per install (Metron asked: no fixed
+    default), saved on first start with an Event; prod will move off 05:00 UTC
+    on upgrade. 429/outage waits get up to 20% random jitter. The Metron test
+    shows the account's `X-RateLimit-Sustained-Limit` (supporter tiers).
+  - Languages: `search.languages` (default en), `search.other_languages`
+    ask|reject. "ask" holds the best other-language release on the Queue page
+    ("Needs your OK": OK / Reject); a later preferred release supersedes it.
+    Interactive search lists them under "Other languages" with Grab anyway.
+  - Numberless graphic novels count as #1 only for a one-issue collected/GN
+    series, exact name, not an ebook, and a comic archive format or matching year.
+  - Libgen titles cleaned (`shelfmark.clean_libgen_title`); Libgen also runs
+    in issue-specific fallback searches (Anna's Archive doesn't: slow).
+  - Failed downloads start a new search for their issues (`search.retry_failed`,
+    ≤ 5 a day per issue). Needed because many Libgen copies are dead on its CDN
+    (Black Hole #1: 5 of 6; #3: 7 of 7).
+- **Live Shelfmark/Libgen test 2026-10-19:** Black Hole #1 grabbed via
+  Shelfmark (Libgen), CBR converted, imported to
+  `/data/Shelfmark/fumora-test-library/Black Hole (1995)/Black Hole 001 (1995).cbz`.
+  fumora-test now also mounts `/mnt/user/data/Shelfmark:/data/Shelfmark:rw`;
+  test `shelfmark.sources=libgen`. Test DB: Black Hole #1/#3 file rows were
+  dropped to make them wanted (#3 has no live Libgen copy).
+- **Manga (series not on Metron, e.g. Mieruko-chan, from Mylar with CV ids):**
+  `Series.numbering` auto|issues|volumes (migration 0008); auto = volumes when
+  issues are titled "Volume N" (ComicVine's manga naming). Volume numbering
+  matches "Vol. 12" to issue 12 and uses the collected size limit. Parser now
+  strips "Publisher - Series" prefixes (Libgen's "Yen.Press.-.Mieruko..."),
+  Libgen folder paths are dropped. Live 2026-10-19: auto search for
+  Mieruko-chan v12 on test grabbed Libgen's copy (dead on the CDN), the monitor
+  re-searched by itself; only other copy is MyAnonamouse (torrent, can't import
+  on fumora-test's layout). Mieruko-chan was copied into the test DB (id 15,
+  only #12 monitored). GAP: not-on-Metron series never get new issues (refresh
+  is Metron-only); plan = ComicVine fallback refresh by cv_id.
+- **Shelfmark's Anna's Archive search is broken on Shelfmark's side** (v1.4.0):
+  owner removed the bad `annas-archive.is` mirror; AA's search now answers with a
+  DDoS-Guard CAPTCHA no bypasser can solve (byparr update didn't help; Shelfmark
+  has no manual cookie import). Owner turned Shelfmark's Libgen search on: works.
 
 ## Deployments (Hathor, 192.168.9.10)
 
 | Container | Port | Image | Notes |
 | --- | --- | --- | --- |
 | `fumora` (production) | 8792 | `ghcr.io/majawat/fumora:edge` | `/data` mounted **read-only**; scheduler on (daily Metron refresh 05:00 UTC) |
-| `fumora-test` | 8793 | local `fumora:m4b` | `FUMORA_SCHEDULER=0`; writable only `/data/media/comics-test` and `/data/usenet` (downloads + `fumora-test-library`) |
+| `fumora-test` | 8793 | local `fumora:m5` (branch `m5-ddl`) | `FUMORA_SCHEDULER=0`; writable only `/data/media/comics-test` and `/data/usenet` (downloads + `fumora-test-library`) |
 
 Unraid templates: `/boot/config/plugins/dockerMan/templates-user/my-fumora.xml`
 and `my-fumora-test.xml`. Recreate containers with the same `docker run`
 arguments (see git history of this doc or `docker inspect`).
 
-Production DB backup before M3 migration:
-`/mnt/user/appdata/fumora/fumora-backup-pre-m3-2026-10-17.db`.
+Production DB backups before migrations:
+`/mnt/user/appdata/fumora/fumora-backup-pre-m3-2026-10-17.db`,
+`/mnt/user/appdata/fumora/fumora-backup-pre-m4-2026-10-18.db` (schema now 0006).
 
 ## Rules that must not be broken
 
@@ -101,7 +169,7 @@ Production DB backup before M3 migration:
 ## Open issues worth knowing
 
 - #5 does a TPB satisfy single issues (M5) · #7 Shelfmark test for Anna's
-  Archive (M5) · #8 expose externally? · #14 Metron gaps / contribution helper
+  Archive (M5; see "Where M5a stands": Shelfmark's AA search is broken) · #8 expose externally? · #14 Metron gaps / contribution helper
   · #16 parser (part done in M4 part 1).
 - Not built yet from the M3 plan: one Fumora series spanning several Metron
   series (Uncle Scrooge), Metron pull-list sync (see #19 comments).

@@ -2,7 +2,7 @@
 and the reasons it was or wasn't accepted, and a Grab button for each.
 
 Results stay on the server under a short-lived token, so the page never carries
-download links (they contain the Prowlarr API key)."""
+download links (Prowlarr's contain its API key)."""
 
 import asyncio
 import secrets
@@ -14,14 +14,13 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from .. import settings_store
 from ..auto_search import SEARCH
 from ..downloaders import DownloaderError
-from ..grabbing import active_grab, blocklist, grab, is_blocklisted
+from ..grabbing import APPROVAL, active_grab, blocklist, client_for, grab, is_blocklisted, send
 from ..importer import log
+from ..indexers import Indexers
 from ..models import Grab, Issue, Series
-from ..prowlarr import ProwlarrClient, ProwlarrError
-from ..search import evaluate, fallback_queries, load_profile, queries_for, rank
+from ..search import evaluate, fallback_queries, load_profile, queries_for, rank, wants
 
 RESULTS_TTL = 30 * 60
 
@@ -46,39 +45,40 @@ def register_search_routes(app: FastAPI, templates: Jinja2Templates, get_db) -> 
         )
         if issue is None:
             raise HTTPException(404)
-        url = settings_store.get(db, "prowlarr.url")
-        key = settings_store.get(db, "prowlarr.api_key")
-        error, candidates, queries = None, [], queries_for(issue)
-        if not url or not key:
-            error = "Add your Prowlarr URL and API key in Settings first."
+        indexers = Indexers(db)
+        error, candidates, queries, problems = None, [], queries_for(issue), []
+        if not indexers.names:
+            error = "Set up Prowlarr, GetComics or Shelfmark in Settings first."
         else:
             profile = load_profile(db)
+            want = wants([issue])
             seen: set[str] = set()
 
-            def add(results: list[list[dict]]) -> None:
-                for batch in results:
-                    for rel in batch:
+            async def run(qs: list[str], slow: bool) -> None:
+                for found, errs in await asyncio.gather(*(indexers.search(q, want, slow) for q in qs)):
+                    problems.extend(e for e in errs if e not in problems)
+                    for rel in found:
                         guid = rel.get("guid") or rel.get("downloadUrl")
                         if guid not in seen:
                             seen.add(guid)
                             candidates.append(evaluate(rel, issue, profile))
 
-            try:
-                async with ProwlarrClient(url, key) as prowlarr:
-                    add(await asyncio.gather(*(prowlarr.search(q) for q in queries)))
-                    if not any(c.accepted for c in candidates):
-                        extra = fallback_queries(issue)
-                        queries += extra
-                        add(await asyncio.gather(*(prowlarr.search(q) for q in extra)))
-            except ProwlarrError as exc:
-                error = str(exc)
+            async with indexers:
+                await run(queries, slow=True)
+                if not any(c.accepted for c in candidates):
+                    extra = fallback_queries(issue)
+                    queries += extra
+                    await run(extra, slow=False)
+            if problems and not candidates:
+                error = "; ".join(problems)
         ranked = rank(candidates)
         # Show what matters: everything accepted, plus rejected ones that were close
         # (right issue, filtered for size/words/seeders...).
-        close = [c for c in ranked if not c.accepted and c.identified]
+        close = [c for c in ranked if c.rejections and c.identified]
         accepted = [c for c in ranked if c.accepted]
-        token = _remember(issue.id, accepted)
-        for c in accepted:
+        held = [c for c in ranked if c.holdable]  # e.g. another language: grab by hand if you like
+        token = _remember(issue.id, accepted + held)
+        for c in accepted + held:
             c.blocklisted = is_blocklisted(db, c.release)
         return templates.TemplateResponse(
             request,
@@ -88,9 +88,12 @@ def register_search_routes(app: FastAPI, templates: Jinja2Templates, get_db) -> 
                 "token": token,
                 "busy": active_grab(db, issue.id),
                 "accepted": accepted,
+                "held": held,
                 "close": close,
-                "hidden": len(ranked) - len(close) - sum(1 for c in ranked if c.accepted),
+                "hidden": len(ranked) - len(close) - len(accepted) - len(held),
                 "queries": queries,
+                "sources": indexers.names,
+                "problems": problems,
                 "error": error,
             },
         )
@@ -111,7 +114,11 @@ def register_search_routes(app: FastAPI, templates: Jinja2Templates, get_db) -> 
             .where(Issue.id == issue_id)
             .options(selectinload(Issue.series).selectinload(Series.issues))
         )
-        if active_grab(db, issue_id) is not None:
+        busy = active_grab(db, issue_id)
+        if busy is not None and busy.state == APPROVAL:
+            busy.state = "removed"  # picking a release by hand replaces the one waiting for an OK
+            busy.message = "Replaced by a release picked by hand"
+        elif busy is not None:
             raise HTTPException(409, "A download for this issue is already under way; see Queue.")
         if is_blocklisted(db, candidate.release):
             raise HTTPException(409, "That release is blocklisted.")
@@ -147,9 +154,11 @@ def register_search_routes(app: FastAPI, templates: Jinja2Templates, get_db) -> 
                 .options(selectinload(Issue.series))
             )
         }
+        live = ("queued", "downloading", "importing", APPROVAL)
         return {
+            "approval": [g for g in grabs if g.state == APPROVAL],
             "active": [g for g in grabs if g.state in ("queued", "downloading", "importing")],
-            "history": [g for g in grabs if g.state not in ("queued", "downloading", "importing")],
+            "history": [g for g in grabs if g.state not in live],
             "issues": issues,
         }
 
@@ -169,6 +178,7 @@ def register_search_routes(app: FastAPI, templates: Jinja2Templates, get_db) -> 
             raise HTTPException(404)
         blocklist(db, g, "retried by hand")
         if g.state in ("queued", "downloading", "importing"):
+            _stop_direct(db, g)
             g.state = "removed"
         searching = app.state.jobs.active(SEARCH) is None and g.issue_id is not None
         log(
@@ -184,12 +194,49 @@ def register_search_routes(app: FastAPI, templates: Jinja2Templates, get_db) -> 
             return RedirectResponse("/jobs", status_code=303)
         return RedirectResponse("/queue", status_code=303)
 
+    def _stop_direct(db: Session, g: Grab) -> None:
+        """Fumora's own downloads stop with the grab; other clients keep theirs."""
+        if g.client_job_id and g.state in ("queued", "downloading"):
+            client = client_for(db, g.protocol, g.client)
+            if hasattr(client, "cancel"):
+                client.cancel(g.client_job_id)
+
+    @app.post("/queue/{grab_id}/approve")
+    async def queue_approve(grab_id: int, db: Session = Depends(get_db)):
+        """The owner OKs a release that was held back (e.g. another language)."""
+        g = db.get(Grab, grab_id)
+        if g is None or g.state != APPROVAL:
+            raise HTTPException(404)
+        try:
+            await send(db, g)
+        except DownloaderError as exc:
+            db.rollback()
+            raise HTTPException(502, str(exc)) from exc
+        g.message = None
+        log(db, f"Grabbed '{g.release_title}' after your OK", kind="grab", issue_id=g.issue_id)
+        db.commit()
+        return RedirectResponse("/queue", status_code=303)
+
+    @app.post("/queue/{grab_id}/reject")
+    def queue_reject(grab_id: int, db: Session = Depends(get_db)):
+        """Not this one: blocklist it so the next search looks for another."""
+        g = db.get(Grab, grab_id)
+        if g is None or g.state != APPROVAL:
+            raise HTTPException(404)
+        blocklist(db, g, "rejected by hand")
+        g.state, g.message = "removed", "Rejected by hand"
+        db.commit()
+        return RedirectResponse("/queue", status_code=303)
+
     @app.post("/queue/{grab_id}/remove")
-    def queue_remove(grab_id: int, db: Session = Depends(get_db)):
-        """Stop following this download (it stays in the download client)."""
+    async def queue_remove(grab_id: int, db: Session = Depends(get_db)):
+        """Stop following this download (it stays in the download client; Fumora's own
+        downloads are stopped)."""
         g = db.get(Grab, grab_id)
         if g is None:
             raise HTTPException(404)
+        if g.state in ("queued", "downloading", "importing"):
+            _stop_direct(db, g)
         g.state = "removed"
         db.commit()
         return RedirectResponse("/queue", status_code=303)

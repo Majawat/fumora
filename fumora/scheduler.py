@@ -2,15 +2,39 @@
 
 import asyncio
 import logging
+import random
 from datetime import UTC, datetime
 
 from . import settings_store
 from .auto_search import SEARCH
 from .grabbing import check_downloads
+from .models import Event, Setting
 from .refresh import REFRESH
 
 log = logging.getLogger("fumora.scheduler")
 CHECK_EVERY = 300  # seconds
+
+
+def ensure_refresh_time(db, rng: random.Random | None = None) -> str | None:
+    """Give this install its own random daily refresh time (HH:MM UTC), once.
+
+    Metron asked apps not to ship a fixed default time: every install would hit
+    it at the same moment. Saved like a normal setting, so it shows on the
+    Settings page and can be changed; an empty value (off) is left alone."""
+    if db.get(Setting, "schedule.refresh_time") is None:
+        rng = rng or random.Random()
+        at = f"{rng.randrange(24):02}:{rng.randrange(60):02}"
+        settings_store.put(db, "schedule.refresh_time", at)
+        db.add(
+            Event(
+                kind="settings",
+                message=f"Daily Metron refresh set to {at} UTC, picked at random so installs don't all "
+                "hit Metron at once (Metron's request; the old default was 05:00). Change it in Settings.",
+            )
+        )
+        db.commit()
+        log.info("daily Metron refresh time set to %s UTC", at)
+    return settings_store.get(db, "schedule.refresh_time")
 
 
 def due(now: datetime, at: str | None, last_run_day: str | None) -> bool:
@@ -38,11 +62,21 @@ def search_due(now: datetime, enabled: str | None, every_hours: str | None, last
     return (now - datetime.fromisoformat(last)).total_seconds() >= hours * 3600
 
 
-async def run_download_monitor(session_factory, every: int = 60) -> None:
-    """Follow downloads every minute and import the finished ones."""
+async def run_download_monitor(session_factory, jobs=None, every: int = 60) -> None:
+    """Follow downloads every minute and import the finished ones; a failed one
+    starts a new search for its issue (see grabbing.retry_candidates)."""
+
+    def search_again(issue_ids: list[int]) -> None:
+        if jobs is None:
+            return
+        if jobs.active(SEARCH) is not None:
+            log.info("download failed for %s; a search is running, so not searching again now", issue_ids)
+            return
+        jobs.start(SEARCH, {"issue_ids": issue_ids, "retry": True})
+
     while True:
         try:
-            await check_downloads(session_factory)
+            await check_downloads(session_factory, on_failed=search_again)
         except Exception:
             log.exception("download check failed")
         await asyncio.sleep(every)

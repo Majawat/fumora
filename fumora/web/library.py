@@ -143,9 +143,11 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
         series_id: int,
         age_rating: str = Form(""),
         tags: str = Form(""),
+        numbering: str = Form("auto"),
         db: Session = Depends(get_db),
     ):
         series = _get_series(db, series_id)
+        series.numbering = numbering if numbering in ("auto", "issues", "volumes") else "auto"
         series.age_rating_override = age_rating if age_rating in METRON_RATINGS else None
         wanted = []
         for name in (t.strip() for t in tags.split(",")):
@@ -215,17 +217,16 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
         series = db.get(Series, series_id)
         if series is None:
             raise HTTPException(404)
-        user = settings_store.get(db, "metron.username")
-        password = settings_store.get(db, "metron.password")
+        user, password, token = settings_store.metron_login(db)
         error = None
         taken = db.scalar(select(Series).where(Series.metron_id == metron_id, Series.id != series.id))
         if taken is not None:
             error = f"Metron series {metron_id} is already matched to '{taken.name}'."
-        elif not user or not password:
-            error = "Save a Metron username and password in Settings first."
+        elif not settings_store.metron_usable(user, password, token):
+            error = "Save a Metron API token (or username and password) in Settings first."
         else:
             try:
-                async with app.state.make_metron_client(user, password) as client:
+                async with app.state.make_metron_client(user, password, token) as client:
                     detail = await client.series(metron_id)
                     apply_metron_series(db, series, detail)
                     series.match_status, series.match_note = "matched", "Matched by hand"

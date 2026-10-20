@@ -27,12 +27,12 @@ class FakeTime:
 
 
 def make_limiter(t, min_interval=1.0):
-    return RateLimiter(min_interval=min_interval, clock=t.clock, sleep=t.sleep)
+    return RateLimiter(min_interval=min_interval, clock=t.clock, sleep=t.sleep, jitter=0)
 
 
 async def test_limiter_spaces_requests_evenly_at_20_a_minute():
     t = FakeTime()
-    limiter = RateLimiter(clock=t.clock, sleep=t.sleep)  # defaults: 20 a minute
+    limiter = RateLimiter(clock=t.clock, sleep=t.sleep, jitter=0)  # defaults: 20 a minute
     for _ in range(4):
         await limiter.acquire()
     assert t.slept == [pytest.approx(3.0)] * 3
@@ -164,3 +164,35 @@ async def test_headers_update_limiter():
     async with MetronClient("u", "p", limiter) as client:
         await client.series(5)
     assert limiter.sustained_remaining == 4992
+
+
+@respx.mock
+async def test_api_token_is_sent_as_bearer_instead_of_basic():
+    t = FakeTime()
+    route = respx.get(f"{BASE_URL}series/1/").respond(200, json={"id": 1})
+    async with MetronClient("u", "p", make_limiter(t, 0), token="tok123") as client:
+        await client._get("series/1/")
+    auth = route.calls[0].request.headers["authorization"]
+    assert auth == "Bearer tok123"
+
+
+def test_settings_prefer_the_token(app):
+    from fumora import settings_store
+
+    with app.state.session_factory() as db:
+        assert not settings_store.metron_ready(db)
+        settings_store.put(db, "metron.api_token", "tok")
+        assert settings_store.metron_ready(db)
+        assert settings_store.metron_login(db) == (None, None, "tok")
+
+
+def test_waits_after_errors_are_jittered():
+    t = FakeTime()
+    waits = set()
+    for _ in range(20):
+        limiter = RateLimiter(clock=t.clock, sleep=t.sleep)
+        limiter.on_rate_limited(100)
+        wait = limiter.blocked_until - t.now
+        assert 100 <= wait <= 120
+        waits.add(round(wait, 3))
+    assert len(waits) > 1

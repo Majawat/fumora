@@ -12,7 +12,7 @@
 
 <section class="card">
   <h2>Tags for the whole library</h2>
-  <p class="muted">Covers every series whose Metron match is confirmed (or that isn't on Metron). Unconfirmed matches are skipped and cost no Metron requests. The first run fetches Metron's record for each issue (5,000 a day); the job waits out the daily limit by itself.</p>
+  <p class="muted">Covers every series whose Metron match is confirmed (or that isn't on Metron). Unconfirmed matches are skipped and cost no Metron requests. The first run fetches Metron's record for each issue (your daily Metron limit: 5,000 standard, more for supporters); the job waits out the daily limit by itself.</p>
   {% if preview.would_change or preview.up_to_date or preview.errors %}
   <p><strong>Latest results:</strong> {{ preview.would_change }} files would change, {{ preview.up_to_date }} up to date, {{ preview.errors }} can't be tagged.</p>
   {% if preview.fields %}<p class="muted small">Most-changed fields: {% for k, n in preview.fields.items() %}{% if loop.index <= 10 %}{{ k }} ({{ n }}){% if not loop.last and loop.index < 10 %}, {% endif %}{% endif %}{% endfor %}</p>{% endif %}

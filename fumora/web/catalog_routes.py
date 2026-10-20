@@ -18,11 +18,10 @@ from ..refresh import REFRESH, week_start
 
 def register_catalog_routes(app: FastAPI, templates: Jinja2Templates, get_db) -> None:
     def _client(db: Session):
-        user = settings_store.get(db, "metron.username")
-        password = settings_store.get(db, "metron.password")
-        if not user or not password:
-            raise HTTPException(400, "Save a Metron username and password in Settings first.")
-        return app.state.make_metron_client(user, password)
+        user, password, token = settings_store.metron_login(db)
+        if not settings_store.metron_usable(user, password, token):
+            raise HTTPException(400, "Save a Metron API token (or username and password) in Settings first.")
+        return app.state.make_metron_client(user, password, token)
 
     @app.get("/releases", response_class=HTMLResponse)
     def releases_page(request: Request, week: str | None = None, db: Session = Depends(get_db)):

@@ -24,6 +24,8 @@ class DownloadStatus:
 
 
 class SabnzbdClient:
+    owns_job_folders = True  # an imported job's folder may be removed (see grabbing)
+
     def __init__(self, url: str, api_key: str, category: str = "fumora", transport=None):
         self.category = category
         self._key = api_key

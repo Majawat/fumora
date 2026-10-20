@@ -107,7 +107,8 @@ def _scene_to_spaces(title: str) -> str:
 def parse_release(title: str) -> ParsedRelease:
     raw = html.unescape(title or "").strip()
     r = ParsedRelease(title=raw)
-    text = _scene_to_spaces(raw)
+    # GetComics writes ranges and subtitles with en/em dashes ("#20 – 23").
+    text = _scene_to_spaces(raw.replace("–", "-").replace("—", "-"))
     lowered = text.lower()
 
     # MyAnonamouse: "... by Author, Publisher [ENG / CBZ] [VIP]" -> formats, language, drop authors.
@@ -144,7 +145,8 @@ def parse_release(title: str) -> ParsedRelease:
             r.number = normalize_number(rm.group(1))
 
     # Scene names: "Publisher-Series ... YEAR HYBRID COMIC[ eBook-GROUP]".
-    sm = re.match(r"^([A-Za-z ]+?)-([A-Za-z].*)$", body.strip())
+    # Also "Publisher - Series" ("Yen.Press.-.Mieruko.Chan..." once dots are spaces).
+    sm = re.match(r"^([A-Za-z ]+?)\s*-\s*([A-Za-z].*)$", body.strip())
     if sm and sm.group(1).lower().strip() in SCENE_PUBLISHERS:
         body = sm.group(2)
     if re.search(r"hybrid\s+comic|retail\s+comic|hybrid\s+manga", lowered):
@@ -245,9 +247,10 @@ def matches_issue(
 ) -> bool:
     """Does this release contain issue `number` of a series called one of
     `series_names`? Years (series start, issue cover) guard against a same-name
-    series from another decade. strict=False ignores format and language (to
-    tell "right issue, wrong format" from "another series")."""
-    if strict and (rel.ebook or rel.language != "en"):
+    series from another decade. strict=False ignores the format (to tell
+    "right issue, wrong format" from "another series"). Language is the
+    profile's business (search.evaluate), not matching's."""
+    if strict and rel.ebook:
         return False
     if rel.series_key not in {series_key(n) for n in series_names if n}:
         return False
@@ -272,8 +275,28 @@ def matches_issue(
 
 def matches_volume(rel: ParsedRelease, series_names: list[str], number: str, strict: bool = True) -> bool:
     """A collected volume ("Vol. 3", "TPB 07") for a collected-edition series."""
-    if rel.kind != "volume" or (strict and (rel.ebook or rel.language != "en")):
+    if rel.kind != "volume" or (strict and rel.ebook):
         return False
     names = {series_key(n) for n in series_names if n}
     names |= {series_key(re.sub(r"\s+(tpb|hc|omnibus)$", "", n, flags=re.I)) for n in series_names if n}
     return rel.series_key in names and rel.number == normalize_number(number)
+
+
+ARCHIVE_FORMATS = {"cbz", "cbr", "cb7", "cbt"}
+
+
+def matches_single_volume(rel: ParsedRelease, series_names: list[str], years: tuple[int | None, ...]) -> bool:
+    """A one-volume graphic novel released with no number ("Blankets (2003).cbz").
+
+    No number means less proof, so it needs more: the exact name, not an ebook,
+    and either a comic archive format or a matching year. A year that doesn't
+    match (a same-name book from another decade) always fails."""
+    if rel.kind != "unknown" or rel.ebook:
+        return False
+    if rel.series_key not in {series_key(n) for n in series_names if n}:
+        return False
+    known = [y for y in years if y]
+    year_ok = bool(rel.year and known and any(abs(rel.year - y) <= 1 for y in known))
+    if rel.year and known and not year_ok:
+        return False
+    return year_ok or bool(rel.formats & ARCHIVE_FORMATS)

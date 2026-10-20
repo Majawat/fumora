@@ -1,3 +1,21 @@
+{% if approval %}
+<h2>Needs your OK ({{ approval|length }})</h2>
+<p class="muted small">Found, but held back by your language setting. OK it to download, or reject it so the next search looks for another.</p>
+<div class="scroll"><table class="log">
+  <thead><tr><th>Issue</th><th>Release</th><th>Why</th><th></th></tr></thead>
+  <tbody>
+  {% for g in approval %}{% set i = issues.get(g.issue_id) %}
+  <tr>
+    <td>{% if i %}<a href="/issues/{{ i.id }}">{{ i.series.name }} #{{ i.number }}</a>{% endif %}</td>
+    <td>{{ g.release_title }}<small class="muted why">{{ g.indexer }} · {{ g.protocol }}{% if g.size %} · {{ (g.size / 1048576)|round|int }} MB{% endif %}</small></td>
+    <td>{{ g.message }}</td>
+    <td class="row"><form method="post" action="/queue/{{ g.id }}/approve"><button class="small">OK, download</button></form>
+      <form method="post" action="/queue/{{ g.id }}/reject"><button class="secondary small">Reject</button></form></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
 <h2>Downloading ({{ active|length }})</h2>
 {% if active %}
 <div class="scroll"><table class="log">
@@ -9,7 +27,7 @@
     <td>{{ g.release_title }}<small class="muted why">{{ g.indexer }} · {{ g.protocol }} · {{ g.state }}{% if g.message %} · {{ g.message }}{% endif %}</small></td>
     <td><progress max="100" value="{{ g.progress }}"></progress> {{ g.progress|int }}%</td>
     <td class="row"><form method="post" action="/queue/{{ g.id }}/retry"><button class="secondary small" title="Blocklist this release and search for another">Try another</button></form>
-      <form method="post" action="/queue/{{ g.id }}/remove"><button class="secondary small" title="Stop following it (stays in the download client)">Remove</button></form></td>
+      <form method="post" action="/queue/{{ g.id }}/remove"><button class="secondary small" title="Stop following it (stays in SABnzbd/qBittorrent; GetComics downloads stop)">Remove</button></form></td>
   </tr>
   {% endfor %}
   </tbody>

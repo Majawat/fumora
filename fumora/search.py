@@ -6,6 +6,7 @@ before packs.
 """
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -14,7 +15,15 @@ from sqlalchemy.orm import Session
 from . import settings_store
 from .comicinfo import COLLECTED_TYPES
 from .models import Issue
-from .releases import ParsedRelease, matches_issue, matches_volume, parse_release
+from .numbers import normalize_number
+from .releases import (
+    LANGUAGES,
+    ParsedRelease,
+    matches_issue,
+    matches_single_volume,
+    matches_volume,
+    parse_release,
+)
 
 SOURCE_SCORE = {"digital": 300, "unknown": 200, "upscaled": 150, "scan": 100}
 MB = 1024 * 1024
@@ -31,8 +40,10 @@ class Profile:
     )
     preferred_groups: list[str] = field(default_factory=list)
     blocked_groups: list[str] = field(default_factory=list)
-    protocols: list[str] = field(default_factory=lambda: ["usenet", "torrent"])
+    protocols: list[str] = field(default_factory=lambda: ["usenet", "torrent", "ddl"])
     allow_packs: bool = True
+    languages: list[str] = field(default_factory=lambda: ["en"])
+    other_languages: str = "ask"  # ask: hold for the owner's OK; reject: never
 
 
 def _list(value: str | None) -> list[str]:
@@ -56,22 +67,49 @@ def load_profile(db: Session) -> Profile:
     p.preferred_groups = _list(settings_store.get(db, "quality.preferred_groups"))
     p.blocked_groups = _list(settings_store.get(db, "quality.blocked_groups"))
     p.protocols = [x.lower() for x in _list(settings_store.get(db, "quality.protocols"))] or p.protocols
+    p.languages = [language_code(x) for x in _list(settings_store.get(db, "search.languages"))] or p.languages
+    p.other_languages = settings_store.get(db, "search.other_languages") or p.other_languages
     return p
+
+
+def language_code(value: str | None) -> str:
+    """'en', 'EN', 'English', 'eng' -> 'en'."""
+    v = (value or "").strip().lower()
+    return _LANGUAGE_CODES.get(v) or LANGUAGES.get(v) or v
+
+
+_LANGUAGE_CODES = {
+    "eng": "en", "english": "en", "fra": "fr", "deu": "de", "pol": "pl", "por": "pt", "rus": "ru",
+    "chi": "zh", "zho": "zh", "kor": "ko", "dut": "nl", "nld": "nl", "swe": "sv", "swedish": "sv",
+    "cze": "cs", "ces": "cs", "czech": "cs", "hun": "hu", "hungarian": "hu", "tur": "tr", "turkish": "tr",
+    "croatian": "hr", "hrv": "hr", "serbian": "sr", "srp": "sr", "greek": "el", "gre": "el", "ell": "el",
+}  # fmt: skip
 
 
 @dataclass
 class Candidate:
-    release: dict  # raw Prowlarr result (its downloadUrl stays server-side)
+    # Prowlarr-shaped result (Prowlarr, GetComics, Shelfmark); its downloadUrl stays server-side.
+    release: dict
     parsed: ParsedRelease
     score: int = 0
     rejections: list[str] = field(default_factory=list)
     # The right series and issue, whatever the profile says about it.
     identified: bool = False
     blocklisted: bool = False
+    # Fine except for something the owner may OK by hand (a language not in the list).
+    hold: str | None = None
 
     @property
     def accepted(self) -> bool:
-        return not self.rejections
+        return not self.rejections and self.hold is None
+
+    @property
+    def holdable(self) -> bool:
+        return not self.rejections and self.hold is not None
+
+    @property
+    def language(self) -> str:
+        return language_code(self.release.get("language")) or self.parsed.language
 
     @property
     def size_mb(self) -> float:
@@ -101,23 +139,25 @@ def evaluate(release: dict, issue: Issue, profile: Profile) -> Candidate:
     series = issue.series
     names = [n for n in (series.name, series.mylar_name) if n]
     collected = series.series_type in COLLECTED_TYPES
+    as_volumes = not collected and series.issues_are_volumes  # manga: "Vol. 12" is issue 12
     years = (series.year_began, issue.cover_date.year if issue.cover_date else None)
 
-    if collected:
+    one_volume = collected and len(series.issues) == 1 and normalize_number(issue.number) == "1"
+    if one_volume and matches_single_volume(rel, names, years):
+        c.identified = True  # a graphic novel released without a number
+    elif collected:
         # A collected edition only takes collected volumes, never single issue #N.
         c.identified = matches_volume(rel, names, issue.number, strict=False)
         if not matches_volume(rel, names, issue.number):
-            c.rejections.append(
-                "not this volume"
-                if not c.identified
-                else ("ebook" if rel.ebook else f"language: {rel.language}")
-            )
+            c.rejections.append("not this volume" if not c.identified else "ebook")
+    elif as_volumes and matches_volume(rel, names, issue.number, strict=False):
+        c.identified = True
+        if rel.ebook:
+            c.rejections.append("ebook, not a comic archive")
     elif not matches_issue(rel, names, issue.number, years):
         c.identified = matches_issue(rel, names, issue.number, years, strict=False)
         if rel.ebook:
             c.rejections.append("ebook, not a comic archive")
-        elif rel.language != "en":
-            c.rejections.append(f"language: {rel.language}")
         elif rel.kind == "volume":
             c.rejections.append("a collected volume, not this issue")
         else:
@@ -125,8 +165,14 @@ def evaluate(release: dict, issue: Issue, profile: Profile) -> Candidate:
     else:
         c.identified = True
 
+    if c.language not in profile.languages:
+        if profile.other_languages == "reject":
+            c.rejections.append(f"language: {c.language}")
+        else:
+            c.hold = f"language: {c.language}"
+
     size = c.size_mb
-    limit = profile.max_collected_mb if (collected or rel.kind == "range") else profile.max_mb
+    limit = profile.max_collected_mb if (collected or as_volumes or rel.kind == "range") else profile.max_mb
     if size and size < profile.min_mb:
         c.rejections.append(f"too small ({size:.0f} MB)")
     if size > limit:
@@ -159,8 +205,22 @@ def evaluate(release: dict, issue: Issue, profile: Profile) -> Candidate:
 
 
 def rank(candidates: list[Candidate]) -> list[Candidate]:
-    """Accepted first, best score first; ties go to the larger (more complete) file."""
-    return sorted(candidates, key=lambda c: (not c.accepted, -c.score, -(c.release.get("size") or 0)))
+    """Accepted first, then those held for an OK, best score first; ties go to the
+    larger (more complete) file."""
+    return sorted(
+        candidates,
+        key=lambda c: (not c.accepted, not c.holdable, -c.score, -(c.release.get("size") or 0)),
+    )
+
+
+def wants(issues: list[Issue]) -> Callable[[str], bool]:
+    """Is a title (e.g. a GetComics post) for one of these issues, whatever its format?"""
+    loose = Profile()
+
+    def want(title: str) -> bool:
+        return any(evaluate({"title": title}, i, loose).identified for i in issues)
+
+    return want
 
 
 def queries_for(issue: Issue) -> list[str]:

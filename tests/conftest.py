@@ -14,6 +14,7 @@ def config(tmp_path):
 def app(config):
     app = create_app(config)
     app.state.metron_limiter.min_interval = 0  # no pacing delay against mocked Metron
+    app.state.metron_limiter.jitter = 0
     return app
 
 
