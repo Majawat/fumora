@@ -18,6 +18,7 @@ from .comicvine import make_limiter as make_cv_limiter
 from .config import Config, load_config
 from .db import make_engine, make_session_factory, upgrade_db
 from .ddl import DirectClient
+from .details import DetailFetcher
 from .downloaders import DownloaderError
 from .getcomics import GetComicsClient, GetComicsError
 from .import_job import KIND as MYLAR_IMPORT
@@ -69,7 +70,6 @@ def create_app(config: Config | None = None) -> FastAPI:
     jobs = JobRunner(SessionLocal)
     jobs.register(MYLAR_IMPORT, make_import_handler(config.config_dir, make_metron_client))
     jobs.register(SCAN, make_scan_handler())
-    jobs.register(RETAG, make_retag_handler(make_metron_client))
     jobs.register(ORGANIZE, make_organize_handler())
     jobs.register(REFRESH, make_refresh_handler(make_metron_client))
     jobs.register(SEARCH, make_search_handler())
@@ -81,6 +81,9 @@ def create_app(config: Config | None = None) -> FastAPI:
         return ComicVineClient(api_key, comicvine_limiter)
 
     jobs.register(CV_REFRESH, make_cv_refresh_handler(make_cv_client))
+    jobs.register(RETAG, make_retag_handler(make_metron_client, make_cv_client))
+    # Full issue records just before an import, so new files get full tags (#24).
+    details = DetailFetcher(make_metron_client, metron_limiter, make_cv_client, comicvine_limiter)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -92,7 +95,9 @@ def create_app(config: Config | None = None) -> FastAPI:
         if config.scheduler:
             tasks.append(asyncio.create_task(run_scheduler(SessionLocal, jobs)))
         if config.download_monitor:
-            tasks.append(asyncio.create_task(run_download_monitor(SessionLocal, jobs)))
+            tasks.append(
+                asyncio.create_task(run_download_monitor(SessionLocal, jobs, before_import=details.fetch))
+            )
         yield
         for t in tasks:
             t.cancel()

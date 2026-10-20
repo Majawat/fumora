@@ -242,6 +242,21 @@ def _remove_download_folder(path: str, category: str) -> None:
         pass
 
 
+def tags_on_import(db: Session, protocol: str) -> bool:
+    """Imports are tagged (torrents only when asked: tagging rewrites the seeded file)."""
+    if protocol == "torrent":
+        return (settings_store.get(db, "import.tag_torrents") or "off") == "on"
+    return (settings_store.get(db, "import.tag") or "on") == "on"
+
+
+def _wants_records(db: Session, g: Grab) -> list[int]:
+    """Issues of this grab whose import will write tags (see details.DetailFetcher)."""
+    if not tags_on_import(db, g.protocol):
+        return []
+    series = db.scalar(select(Series).join(Issue).where(Issue.id == g.issue_id)) if g.issue_id else None
+    return list(dict.fromkeys(g.issue_ids or [g.issue_id])) if series is not None and series.writable else []
+
+
 def import_grab(db: Session, g: Grab, path: str) -> str:
     """Import a finished download. Returns a one-line summary."""
     issues = {
@@ -263,8 +278,7 @@ def import_grab(db: Session, g: Grab, path: str) -> str:
 
     opts = naming_settings(db)
     recycle = settings_store.get(db, "library.recycle_path") or "/data/media/fumora-recycle"
-    tag_usenet = (settings_store.get(db, "import.tag") or "on") == "on"
-    tag_torrent = (settings_store.get(db, "import.tag_torrents") or "off") == "on"
+    tags_on = tags_on_import(db, g.protocol)
     imported, skipped = [], []
     for f in files:
         if len(files) == 1 and len(issues) == 1:
@@ -295,7 +309,7 @@ def import_grab(db: Session, g: Grab, path: str) -> str:
         row = File(path=str(placed), size=placed.stat().st_size)
         issue.files.append(row)
         db.commit()  # the file is in the library now: record it whatever happens next
-        if series.writable and (tag_torrent if g.protocol == "torrent" else tag_usenet):
+        if series.writable and tags_on:
             tag_file(issue, row, dry_run=False, recycle_dir=recycle)
             db.commit()
         imported.append(f"#{issue.number}")
@@ -345,10 +359,19 @@ def retry_candidates(db: Session, g: Grab) -> list[int]:
     return list(dict.fromkeys(g.issue_ids or [g.issue_id])) if failures <= MAX_RETRIES_PER_DAY else []
 
 
-async def check_downloads(session_factory, on_failed=None) -> int:
+async def check_downloads(session_factory, on_failed=None, before_import=None) -> int:
     """Poll active grabs; import finished ones. Returns how many changed state.
     on_failed(issue_ids) is called with issues whose download failed and that
-    should be searched again (see retry_candidates)."""
+    should be searched again (see retry_candidates). before_import(session_factory,
+    issue_ids) is awaited before an import that writes tags: it fetches the
+    issues' full records (details.DetailFetcher.fetch)."""
+
+    async def records(g: Grab) -> None:
+        if before_import is not None:
+            ids = _wants_records(db, g)
+            if ids:
+                await before_import(session_factory, ids)
+
     changed = 0
     retry: list[int] = []
     with session_factory() as db:
@@ -362,6 +385,7 @@ async def check_downloads(session_factory, on_failed=None) -> int:
                     # An import cut short (e.g. a restart): run it again from the saved path.
                     _importing.add(g.id)
                     try:
+                        await records(g)
                         await asyncio.to_thread(_import_in_thread, session_factory, g.id, g.path or "")
                     finally:
                         _importing.discard(g.id)
@@ -389,6 +413,7 @@ async def check_downloads(session_factory, on_failed=None) -> int:
                     db.commit()
                     _importing.add(g.id)
                     try:
+                        await records(g)
                         await asyncio.to_thread(_import_in_thread, session_factory, g.id, st.path or "")
                     finally:
                         _importing.discard(g.id)

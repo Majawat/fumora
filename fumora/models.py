@@ -203,6 +203,8 @@ class Issue(Base):
     # Full Metron issue record (credits, characters, ...), cached for tagging.
     metron_detail: Mapped[dict | None] = mapped_column(JSON)
     detail_fetched: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Full ComicVine issue record, for issues of series Metron doesn't have.
+    cv_detail: Mapped[dict | None] = mapped_column(JSON)
 
     series: Mapped[Series] = relationship(back_populates="issues")
     files: Mapped[list["File"]] = relationship(back_populates="issue")

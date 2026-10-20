@@ -30,7 +30,8 @@ Jinja2 + htmx. Image: `ghcr.io/majawat/fumora:edge` (built from `main`).
 | PDF → CBZ (extract page images or render at 300 dpi) | merged 2026-10-18 | #26 |
 | M5a GetComics + Anna's Archive (via Shelfmark) | merged 2026-10-20 | #27 |
 | M5b other sources: ComicVine refresh, move to Metron, add from ComicVine, reading direction, Metron gaps page | merged 2026-10-20 | #28 |
-| M5 rest: TPB links, GCD ratings, full tags at import (#24), manual series, split/join | not started | — |
+| Full tags at import (#24): Metron or ComicVine issue record before an import; version 0.5.0 | on test, branch `m5c-import-tags` | — |
+| M5 rest: TPB links, GCD ratings, manual series, split/join | not started | — |
 | M6 side-by-side week with Mylar, cut over | not started | — |
 
 ### Where M4 part 2 stands
@@ -154,12 +155,21 @@ Design: the doc's "Other metadata sources", "Moving a series to Metron", "Manga"
   ComicVine key from Mylar's config; Mieruko-chan (id 15) is source cv.
   Helper: `/mnt/user/appdata/fumora-test/m5b_run.py cv|metron`.
 
+## Version numbers
+
+`pyproject.toml` and `fumora/__init__.py` (a test keeps them equal). The minor
+number is the milestone (0.5.x = M5), the patch number counts fix releases
+within it, 1.0.0 is the Mylar cutover (M6). Bump in the PR that changes it;
+after merging, tag `vX.Y.Z` on main: the release workflow then publishes
+`:X.Y.Z`, `:X.Y` and `:latest` images (`:edge` follows main regardless).
+Files record the version in their `<Notes>` ("Tagged by Fumora 0.5.0").
+
 ## Deployments (Hathor, 192.168.9.10)
 
 | Container | Port | Image | Notes |
 | --- | --- | --- | --- |
 | `fumora` (production) | 8792 | `ghcr.io/majawat/fumora:edge` | `/data` mounted **read-only**; scheduler on (daily Metron refresh 05:00 UTC) |
-| `fumora-test` | 8793 | local `fumora:m5b` (branch `m5b-sources`) | `FUMORA_SCHEDULER=0`; writable only `/data/media/comics-test` and `/data/usenet` (downloads + `fumora-test-library`) |
+| `fumora-test` | 8793 | local `fumora:m5c` (branch `m5c-import-tags`) | `FUMORA_SCHEDULER=0`; writable only `/data/media/comics-test` and `/data/usenet` (downloads + `fumora-test-library`) |
 
 Unraid templates: `/boot/config/plugins/dockerMan/templates-user/my-fumora.xml`
 and `my-fumora-test.xml`. Recreate containers with the same `docker run`

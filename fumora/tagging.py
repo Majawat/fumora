@@ -1,5 +1,7 @@
 """Tagging: turn Fumora's data into ComicInfo.xml + MetronInfo.xml in each file."""
 
+import html
+import re
 import xml.etree.ElementTree as ET
 from datetime import UTC, date, datetime
 
@@ -7,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from . import __version__, cbz, convert
 from .comicinfo import IssueMeta, build_metroninfo, merge_comicinfo
+from .comicvine import ComicVineClient
 from .metron import MetronClient
 from .models import File, Issue, Series
 from .ratings import TO_COMICINFO, issue_rating
@@ -29,9 +32,51 @@ def _named(items, key: str = "name") -> list[tuple[str, int | None]]:
     return [(i.get(key), i.get("id")) for i in items or [] if i.get(key)]
 
 
+# ComicVine's role words -> Metron's role names (which ROLE_FIELDS maps to ComicInfo).
+CV_ROLES = {
+    "writer": "Writer", "plotter": "Plot", "scripter": "Script", "artist": "Artist",
+    "penciler": "Penciller", "penciller": "Penciller", "breakdowns": "Breakdowns",
+    "inker": "Inker", "colorist": "Colorist", "letterer": "Letterer", "cover": "Cover",
+    "editor": "Editor", "translator": "Translator",
+}  # fmt: skip
+
+
+def _cv_text(description: str | None) -> str | None:
+    """ComicVine descriptions are HTML: keep the text, one paragraph per line."""
+    if not description:
+        return None
+    text = re.sub(r"(?i)<br\s*/?>|</p>|</h\d>|</li>", "\n", description)
+    text = html.unescape(re.sub(r"<[^>]+>", "", text))
+    text = "\n".join(line.strip() for line in text.splitlines())
+    return re.sub(r"\n{3,}", "\n\n", text).strip() or None
+
+
+def _cv_names(items) -> list[tuple[str, int | None]]:
+    # ComicVine ids are not Metron ids: names only.
+    return [(i["name"], None) for i in items or [] if i.get("name")]
+
+
+def cv_fields(cv: dict) -> dict:
+    """IssueMeta fields from a ComicVine issue record (see ensure_cv_detail)."""
+    credits = []
+    for p in cv.get("person_credits") or []:
+        roles = [CV_ROLES.get(r.strip().lower()) for r in (p.get("role") or "").split(",")]
+        if p.get("name"):
+            credits.append((p["name"], None, [(r, None) for r in dict.fromkeys(roles) if r]))
+    return {
+        "credits": credits,
+        "characters": _cv_names(cv.get("character_credits")),
+        "teams": _cv_names(cv.get("team_credits")),
+        "arcs": _cv_names(cv.get("story_arc_credits")),
+        "summary": _cv_text(cv.get("description")),
+    }
+
+
 def issue_meta(issue: Issue) -> IssueMeta:
     series: Series = issue.series
     d = issue.metron_detail or {}
+    # Series Metron doesn't have: ComicVine's record fills the same fields.
+    c = cv_fields(issue.cv_detail) if not d and issue.cv_detail else {}
     ds = d.get("series") or {}
     rating = issue_rating(issue)
     tags = sorted({t.name for t in series.tags} | {t.name for t in issue.tags})
@@ -46,7 +91,10 @@ def issue_meta(issue: Issue) -> IssueMeta:
     web = d.get("resource_url") or (
         f"https://metron.cloud/issue/{issue.metron_id}/"
         if issue.metron_id
-        else (f"https://comicvine.gamespot.com/issue/4000-{cv_id}/" if cv_id else None)
+        else (
+            (issue.cv_detail or {}).get("site_detail_url")
+            or (f"https://comicvine.gamespot.com/issue/4000-{cv_id}/" if cv_id else None)
+        )
     )
     manga = {"rtl": "YesAndRightToLeft", "ltr": "No"}.get(series.reading_direction or "")
     return IssueMeta(
@@ -67,7 +115,7 @@ def issue_meta(issue: Issue) -> IssueMeta:
         stories=[s for s in d.get("name") or [] if s],
         collection_title=d.get("title") or None,
         alt_number=d.get("alt_number") or issue.alt_number or None,
-        summary=d.get("desc") or None,
+        summary=d.get("desc") or c.get("summary"),
         cover_date=issue.cover_date or _date(d.get("cover_date")),
         store_date=issue.store_date or _date(d.get("store_date")),
         # ensure_detail copies these from Metron unless the user locked them.
@@ -77,14 +125,15 @@ def issue_meta(issue: Issue) -> IssueMeta:
         isbn=issue.isbn or None,
         upc=issue.upc or None,
         credits=[
-            (c["creator"], c.get("id"), [(r["name"], r.get("id")) for r in c.get("role") or []])
-            for c in d.get("credits") or []
-            if c.get("creator")
-        ],
-        characters=_named(d.get("characters")),
-        teams=_named(d.get("teams")),
+            (cr["creator"], cr.get("id"), [(r["name"], r.get("id")) for r in cr.get("role") or []])
+            for cr in d.get("credits") or []
+            if cr.get("creator")
+        ]
+        or c.get("credits", []),
+        characters=_named(d.get("characters")) or c.get("characters", []),
+        teams=_named(d.get("teams")) or c.get("teams", []),
         universes=_named(d.get("universes")),
-        arcs=_named(d.get("arcs")),
+        arcs=_named(d.get("arcs")) or c.get("arcs", []),
         reprints=_named(d.get("reprints"), key="issue"),
         age_rating_metron=rating,
         age_rating_comicinfo=TO_COMICINFO.get(rating) if rating else None,
@@ -115,6 +164,17 @@ async def ensure_detail(db: Session, client: MetronClient, issue: Issue) -> None
     if d.get("gcd_id") and "gcd_id" not in (issue.locked_fields or []):
         issue.gcd_id = d["gcd_id"]
     db.flush()
+
+
+async def ensure_cv_detail(db: Session, cv: ComicVineClient, issue: Issue) -> None:
+    """Fetch and cache ComicVine's issue record, for issues Metron doesn't have."""
+    if issue.metron_id is not None or issue.cv_id is None or issue.cv_detail is not None:
+        return
+    record = await cv.issue(issue.cv_id)
+    if record:
+        issue.cv_detail = record
+        issue.detail_fetched = datetime.now(UTC)
+        db.flush()
 
 
 def check_writable(series: Series, file: File) -> None:

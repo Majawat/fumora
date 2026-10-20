@@ -53,12 +53,12 @@ def preview_summary(db: Session) -> dict:
 
 
 def untagged(db: Session) -> list[dict]:
-    """Series whose files can't get full Metron tags: issues without a Metron
-    match (in matched series) and series not on Metron."""
+    """Series whose files get basic tags only: issues with neither a Metron
+    match nor a ComicVine id (ComicVine's record gives the full tags then)."""
     rows = db.execute(
         select(Series, func.count(Issue.id))
         .join(Issue, Issue.series_id == Series.id)
-        .where(Issue.metron_id.is_(None), Issue.files.any())
+        .where(Issue.metron_id.is_(None), Issue.cv_id.is_(None), Issue.files.any())
         .group_by(Series.id)
         .order_by(func.count(Issue.id).desc())
     ).all()
