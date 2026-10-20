@@ -89,7 +89,8 @@ def check_path(db: Session, path: str) -> str:
     """The real path, if it's under one of the import folders."""
     if not path:
         raise ImportPathError("Enter a folder to import from.")
-    real = os.path.realpath(path)
+    # normpath after realpath: symlinks resolved, then the form CodeQL's path check expects.
+    real = os.path.normpath(os.path.realpath(path))
     for root in roots(db):
         if real == root or real.startswith(root.rstrip("/") + "/"):
             if not os.path.exists(real):
