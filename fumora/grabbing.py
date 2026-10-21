@@ -37,6 +37,7 @@ from .library_jobs import naming_settings
 from .models import Blocklist, File, Grab, Issue, Series
 from .numbers import normalize_number
 from .perms import normalize
+from .releases import parse_release, series_key
 from .scanner import COMIC_EXTS, parse_issue_number
 from .search import Candidate
 from .shelfmark import ShelfmarkClient
@@ -327,6 +328,21 @@ def _wants_records(db: Session, g: Grab) -> list[int]:
     return list(dict.fromkeys(g.issue_ids or [g.issue_id])) if series is not None and series.writable else []
 
 
+def _file_number(f: Path, series: Series) -> str | None:
+    """The issue number a downloaded file's name gives, if it clearly names this series.
+    "Vol. 12" counts where the series' issues are volumes (manga, collected editions)."""
+    rel = parse_release(f.name)
+    names = {series_key(n) for n in (series.name, series.mylar_name) if n}
+    if rel.number is None or (rel.series and series_key(rel.series) not in names):
+        num = parse_issue_number(f.name, series.name) or parse_issue_number(f.name, series.mylar_name)
+        return normalize_number(num) if num else None
+    if rel.kind == "issue":
+        return normalize_number(rel.number)
+    if rel.kind == "volume" and (series.issues_are_volumes or series.series_type in COLLECTED_TYPES):
+        return normalize_number(rel.number)
+    return None
+
+
 def import_grab(db: Session, g: Grab, path: str) -> str:
     """Import a finished download. Returns a one-line summary."""
     issues = {
@@ -342,6 +358,9 @@ def import_grab(db: Session, g: Grab, path: str) -> str:
     series = next(iter(issues.values())).series
     if not series.path:
         series.path = folder_for(db, series)
+    if not path:
+        # Path("") is the current folder: never go looking there.
+        raise ImportFailed("The download client said it finished but gave no folder for it")
     files = _comic_files(path)
     if not files:
         raise ImportFailed(f"No comic files found in {path}")
@@ -353,9 +372,13 @@ def import_grab(db: Session, g: Grab, path: str) -> str:
     for f in files:
         if len(files) == 1 and len(issues) == 1:
             issue = next(iter(issues.values()))
+            said = _file_number(f, series)
+            if said is not None and said != normalize_number(issue.number):
+                # The file says it's another issue: never import it under this one's name.
+                skipped.append(f"{f.name}: the file is #{said}, not #{issue.number}")
+                continue
         else:
-            num = parse_issue_number(f.name, series.name) or parse_issue_number(f.name, series.mylar_name)
-            want = normalize_number(num) if num else None
+            want = _file_number(f, series)
             issue = next((i for i in issues.values() if normalize_number(i.number) == want), None)
         if issue is None:
             skipped.append(f"{f.name}: no matching issue")
@@ -453,6 +476,17 @@ async def check_downloads(session_factory, on_failed=None, before_import=None) -
                 if client is None:
                     client = client_for(db, g.protocol, g.client)
                     if client is None:
+                        # Said, not skipped for ever: a stuck "downloading" would block the issue.
+                        g.state, g.finished = "failed", datetime.now(UTC)
+                        g.message = f"{g.client or g.protocol} isn't set up in Settings any more"
+                        log(
+                            db,
+                            f"Download '{g.release_title}' failed: {g.message}",
+                            kind="grab",
+                            level="error",
+                        )
+                        db.commit()
+                        changed += 1
                         continue
                     clients[g.client] = client
                 if not g.client_job_id:

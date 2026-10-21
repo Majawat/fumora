@@ -96,7 +96,11 @@ def series_key(name: str | None) -> str:
 
 def _scene_to_spaces(title: str) -> str:
     """'DC.Comics-Absolute.Batman.No.02.2024.HYBRID.COMIC' -> spaced words."""
-    if " " in title or title.count(".") < 2 and title.count("_") < 2:
+    words = title.split()
+    scene = max(words, key=len) if words else ""
+    # Scene style if the longest word is dotted/underscored ("A.B.No.02.2024 [Digital]"
+    # still counts); "Mr. Miracle 001" or "Vol. 2" never does.
+    if scene.count(".") < 2 and scene.count("_") < 2:
         return title
     out = re.sub(r"(?<=No)\.(?=\d)", " ", title)  # No.02 -> No 02
     out = re.sub(r"(\d)\.(?=(?:19|20)\d{2}(?!\d))", r"\1 ", out)  # 009.2025 -> 009 2025 (issue, year)
@@ -224,7 +228,7 @@ def parse_release(title: str) -> ParsedRelease:
     series = head if head is not None else body
     series = re.sub(r"\s+-\s*$|[-:#,]+\s*$", "", series.strip())
     series = re.sub(r"\s+", " ", series).strip(" -_.")
-    if vm2 := re.search(r"\s+v(\d{1,4})$", series, re.I):  # "Batman v3", "Batman v2016"
+    if vm2 := re.search(r"\s+v(?:ol(?:ume)?)?\.?\s*(\d{1,4})$", series, re.I):  # "Batman v3", "Vol. 3"
         r.volume = r.volume or vm2.group(1)
         series = series[: vm2.start()].strip()
     series = re.sub(r"\s+(?:19|20)\d{2}\s*-\s*(?:19|20)\d{2}$", "", series)  # trailing year span

@@ -20,7 +20,7 @@ from .grabbing import APPROVAL, active_grab, grab, is_blocklisted
 from .importer import log
 from .indexers import Indexers
 from .jobs import JobContext
-from .models import Issue, Series
+from .models import File, Grab, Issue, Series
 from .search import evaluate, fallback_queries, load_profile, queries_for, rank, wants
 
 SEARCH = "search"
@@ -58,6 +58,15 @@ def make_search_handler():
             else:
                 q = q.where(monitoring.wanted_clause())
             wanted = db.scalars(q).all()
+            # A failed import needs a look (Queue: Try another blocklists it and searches
+            # again); grabbing the same release automatically would fail the same way.
+            stuck = {
+                i
+                for g in db.scalars(select(Grab).where(Grab.state == "import_failed"))
+                for i in (g.issue_ids or [g.issue_id])
+            }
+            if not by_hand:  # asked for by hand: the owner has looked
+                wanted = [i for i in wanted if i.id not in stuck]
             cutoff = (datetime.now(UTC) - timedelta(hours=delay)).date()
             todo = [
                 i
@@ -76,6 +85,7 @@ def make_search_handler():
                     want = wants(issues)
                     results: list[dict] = []
                     failed: list[str] = []
+                    db.commit()  # end the read transaction before waiting on the network
                     answers = await asyncio.gather(
                         *(indexers.search(q, want) for q in queries_for(issues[0]))
                     )
@@ -105,15 +115,22 @@ def make_search_handler():
                         best = _best(pool, issue, profile, db, taken)
                         if (best is None or best.holdable) and fallbacks < MAX_FALLBACK_SEARCHES:
                             fallbacks += 1
+                            db.commit()
                             for qtext in fallback_queries(issue):
-                                found, _errs = await indexers.search(qtext, wants([issue]), slow=False)
+                                found, errs = await indexers.search(qtext, wants([issue]), slow=False)
                                 pool = pool + found
+                                if errs:
+                                    errors += len(errs)
+                                    log(db, f"Search problems for '{issue.series.name} #{issue.number}': "
+                                        f"{'; '.join(errs)}", kind=SEARCH, level="error")  # fmt: skip
                             best = _best(pool, issue, profile, db, taken)
                         if best is None:
                             missing += 1
                             continue
                         if waiting is not None and best.holdable:
                             continue  # a release held for an OK, and still nothing better
+                        if db.scalar(select(File.id).where(File.issue_id == issue.id).limit(1)):
+                            continue  # imported while this search was waiting on indexers
                         try:
                             await grab(db, best, issue, approval=best.holdable)
                             if waiting is not None:  # only once the better one was sent

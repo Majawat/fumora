@@ -114,6 +114,8 @@ def register_search_routes(app: FastAPI, templates: Jinja2Templates, get_db) -> 
             .where(Issue.id == issue_id)
             .options(selectinload(Issue.series).selectinload(Series.issues))
         )
+        if issue is None:
+            raise HTTPException(404, "That issue no longer exists.")
         busy = active_grab(db, issue_id)
         if busy is not None and busy.state == APPROVAL:
             busy.state = "removed"  # picking a release by hand replaces the one waiting for an OK
@@ -180,6 +182,8 @@ def register_search_routes(app: FastAPI, templates: Jinja2Templates, get_db) -> 
         if g.state in ("queued", "downloading", "importing"):
             _stop_direct(db, g)
             g.state = "removed"
+        elif g.state == "import_failed":
+            g.state = "removed"  # dealt with: the scheduled search may take the issue again
         searching = app.state.jobs.active(SEARCH) is None and g.issue_id is not None
         log(
             db,
@@ -190,7 +194,8 @@ def register_search_routes(app: FastAPI, templates: Jinja2Templates, get_db) -> 
         )
         db.commit()
         if searching:
-            app.state.jobs.start(SEARCH, {"issue_ids": [g.issue_id]})
+            # Every issue the grab covered (a pack), not only the first.
+            app.state.jobs.start(SEARCH, {"issue_ids": list(dict.fromkeys(g.issue_ids or [g.issue_id]))})
             return RedirectResponse("/jobs", status_code=303)
         return RedirectResponse("/queue", status_code=303)
 

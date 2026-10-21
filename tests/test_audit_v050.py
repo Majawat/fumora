@@ -271,3 +271,189 @@ async def test_22_a_held_release_stays_held_if_its_replacement_fails(app, tmp_pa
         states = {g.release_title: g.state for g in db.scalars(select(Grab))}
         assert states == {"Absolute Batman 016 (2026) FRENCH": APPROVAL}
         assert db.scalar(select(Event).where(Event.message.like("Couldn't send%"))) is not None
+
+
+# --- download pipeline ------------------------------------------------------------------
+
+
+def _grab_row(db, issue_ids, title="x", state="downloading", **kw):
+    g = Grab(issue_id=issue_ids[0], issue_ids=issue_ids, indexer="t", release_title=title, protocol="usenet",
+             client="sabnzbd", state=state, **kw)  # fmt: skip
+    db.add(g)
+    db.commit()
+    return g
+
+
+def test_24_a_pack_of_manga_volumes_is_matched_by_volume(app, tmp_path):
+    from fumora.grabbing import import_grab
+
+    _setup(app, tmp_path, numbers=("1", "2"))
+    dl = tmp_path / "pack"
+    dl.mkdir()
+    for n in (1, 2):
+        make_cbz(dl / f"Absolute Batman Vol. {n:02} (2024).cbz")
+    with app.state.session_factory() as db:
+        s = db.scalar(select(Series))
+        s.numbering = "volumes"
+        settings_store.put(db, "import.tag", "off")
+        g = _grab_row(db, [_abs(db, "1").id, _abs(db, "2").id])
+        assert import_grab(db, g, str(dl)).startswith("Imported #1, #2")
+
+
+def test_26_a_single_file_that_is_another_issue_is_not_imported(app, tmp_path):
+    from fumora.grabbing import import_grab
+
+    _setup(app, tmp_path, numbers=("16",))
+    dl = tmp_path / "one"
+    dl.mkdir()
+    make_cbz(dl / "Absolute Batman 017 (2026).cbz")
+    with app.state.session_factory() as db:
+        g = _grab_row(db, [_abs(db, "16").id])
+        with pytest.raises(ImportFailed, match="the file is #17, not #16"):
+            import_grab(db, g, str(dl))
+
+
+@respx.mock
+async def test_27_a_failed_import_is_not_grabbed_again_automatically(app, tmp_path):
+    _setup(app, tmp_path, numbers=("16",))
+    search = respx.get("http://prowlarr.test/api/v1/search").respond(
+        200, json=[_release("Absolute Batman 016 (2026) (Digital)")]
+    )
+    with app.state.session_factory() as db:
+        _grab_row(db, [_abs(db, "16").id], state="import_failed")
+    summary = await make_search_handler()(_job(app, "search", {}))
+    assert summary.startswith("Searched 0 wanted issues") and not search.called
+
+
+@respx.mock
+async def test_28_an_issue_imported_during_the_search_is_not_grabbed(app, tmp_path):
+    _setup(app, tmp_path, numbers=("16",))
+    sf = app.state.session_factory
+
+    def imported_meanwhile(request):
+        with sf() as db:  # the download monitor imports #16 while the indexer answers
+            issue = _abs(db, "16")
+            if not issue.files:
+                issue.files.append(File(path=str(tmp_path / "x.cbz")))
+                db.commit()
+        return httpx.Response(200, json=[_release("Absolute Batman 016 (2026) (Digital)")])
+
+    respx.get("http://prowlarr.test/api/v1/search").mock(side_effect=imported_meanwhile)
+    sab = respx.get(f"{SAB}/api", params={"mode": "addurl"}).respond(
+        200, json={"status": True, "nzo_ids": ["n"]}
+    )
+    summary = await make_search_handler()(_job(app, "search", {}))
+    assert not sab.called
+    # Found (the import could write while the search waited: #29) and still not grabbed.
+    assert "grabbed 0, nothing found for 0" in summary and "errors" not in summary
+
+
+def test_25_30_release_names(app):
+    from fumora.releases import parse_release
+
+    r = parse_release("DC.Comics-Absolute.Batman.No.02.2024.HYBRID.COMIC [Digital]")
+    assert (r.series, r.number) == ("Absolute Batman", "2")  # de-dotted, publisher prefix dropped
+    assert parse_release("Mr. Miracle 001 (2017)").series == "Mr. Miracle"
+    r = parse_release("Batman Vol. 3 016 (2016) (Digital)")
+    assert (r.series, r.number, r.volume) == ("Batman", "16", "3")
+
+
+def test_31_a_new_issue_without_a_cover_date_matches_its_year(app, tmp_path):
+    from fumora.search import Profile, evaluate
+
+    _setup(app, tmp_path, numbers=("30",))
+    with app.state.session_factory() as db:
+        issue = _abs(db, "30")
+        issue.series.year_began = 2022
+        issue.cover_date, issue.store_date = None, date(2026, 3, 1)
+        c = evaluate(_release("Absolute Batman 030 (2026) (Digital)"), issue, Profile())
+        assert c.identified and "wrong year" not in " ".join(c.rejections)
+
+
+async def test_32_a_retry_asked_for_during_a_search_runs_afterwards(app, monkeypatch):
+    import asyncio
+
+    from fumora import scheduler
+
+    started = []
+
+    class Jobs:
+        running = True
+
+        def active(self, kind):
+            return object() if self.running else None
+
+        def start(self, kind, params):
+            started.append(params)
+
+    jobs = Jobs()
+    calls = {"n": 0}
+
+    async def fake_check(sf, on_failed=None, before_import=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            on_failed([5])  # a download failed while a search runs
+        elif calls["n"] == 2:
+            jobs.running = False  # the search ended
+        else:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(scheduler, "check_downloads", fake_check)
+    with pytest.raises(asyncio.CancelledError):
+        await scheduler.run_download_monitor(app.state.session_factory, jobs, every=0)
+    assert started == [{"issue_ids": [5], "retry": True}]
+
+
+@respx.mock
+async def test_33_shelfmark_http_errors_are_reported_as_such():
+    from fumora.shelfmark import ShelfmarkClient, ShelfmarkError
+
+    respx.get("http://shelfmark.test/api/releases").respond(502, text="<html>Bad Gateway</html>")
+    async with ShelfmarkClient("http://shelfmark.test") as sm:
+        with pytest.raises(ShelfmarkError, match="HTTP 502"):
+            await sm.search("x")
+
+
+def test_34_no_download_folder_is_an_error(app, tmp_path):
+    from fumora.grabbing import import_grab
+
+    _setup(app, tmp_path, numbers=("16",))
+    with app.state.session_factory() as db:
+        g = _grab_row(db, [_abs(db, "16").id])
+        with pytest.raises(ImportFailed, match="gave no folder"):
+            import_grab(db, g, "")
+
+
+async def test_35_a_download_whose_client_is_gone_fails_instead_of_hanging(app, tmp_path):
+    from fumora.grabbing import check_downloads
+
+    _setup(app, tmp_path, numbers=("16",))
+    with app.state.session_factory() as db:
+        settings_store.put(db, "sabnzbd.url", "")
+        g = _grab_row(db, [_abs(db, "16").id], client_job_id="n1")
+        gid = g.id
+    await check_downloads(app.state.session_factory)
+    with app.state.session_factory() as db:
+        g = db.get(Grab, gid)
+        assert g.state == "failed" and "isn't set up" in g.message
+
+
+def test_37_grab_for_a_deleted_issue_is_a_404(app, logged_in):
+    import time as _t
+
+    app.state.search_results["tok"] = (_t.time() + 60, 999, ["c"])
+    assert logged_in.post("/issues/999/grab", data={"token": "tok", "index": 0}).status_code == 404
+
+
+def test_38_try_another_on_a_pack_searches_every_issue(app, tmp_path, logged_in):
+    _setup(app, tmp_path, numbers=("1", "2", "3"))
+    started = []
+    app.state.jobs.start = lambda kind, params: started.append(params)
+    with app.state.session_factory() as db:
+        ids = [_abs(db, n).id for n in ("1", "2", "3")]
+        g = _grab_row(db, ids, state="import_failed")
+        gid = g.id
+    logged_in.post(f"/queue/{gid}/retry")
+    assert started == [{"issue_ids": ids}]
+    with app.state.session_factory() as db:
+        assert db.get(Grab, gid).state == "removed"

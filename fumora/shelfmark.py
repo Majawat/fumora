@@ -132,12 +132,16 @@ class ShelfmarkClient:
             resp = await self._request(
                 "GET", "/api/releases", params={"source": source, "query": query, "content_type": "ebook"}
             )
-            data = self._json(resp)
             if resp.status_code >= 400:
+                try:
+                    data = resp.json()
+                except ValueError:
+                    data = None
                 msg = (data or {}).get("error") if isinstance(data, dict) else None
                 if resp.status_code == 503 and msg and "no books found" in msg.lower():
                     continue  # Shelfmark's way of saying "nothing"
                 raise ShelfmarkError(f"Shelfmark ({source}): {msg or f'HTTP {resp.status_code}'}")
+            data = self._json(resp)
             out += [to_release(r) for r in (data.get("releases") or []) if r.get("source_id")]
         return out
 
