@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..manual_import import MANUAL_IMPORT, ImportPathError, check_path, propose, resolve, roots
+from ..manual_import import MANUAL_IMPORT, ImportPathError, check_path, propose, resolve, roots, within_roots
 from ..models import Series
 
 _ID = re.compile(r"\[(\d+)\]\s*$")
@@ -59,7 +59,9 @@ def register_import_routes(app: FastAPI, templates: Jinja2Templates, get_db) -> 
         rows, items, issues = [], [], set()
         for n, (p, label, number) in enumerate(zip(paths, series, numbers, strict=True)):
             try:
-                real = check_path(db, str(p))  # only ever the checked path from here on
+                # Only ever the checked path from here on. A file gone since the listing is
+                # reported on its row (resolve), not by failing the whole form.
+                real = within_roots(db, str(p))
             except ImportPathError as exc:
                 raise HTTPException(400, str(exc)) from exc
             m = _ID.search(str(label))

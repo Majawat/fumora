@@ -170,6 +170,22 @@ Design: the doc's "Other metadata sources", "Moving a series to Metron", "Manga"
 - Ad-hoc scripts: `docker exec -u 99:100 <c> sh -c 'umask 0002; ...'` (plain `docker exec` uses
   umask 0022 and root, which is how earlier 644/755 test files appeared).
 
+## Independent review (second AI)
+
+Each PR gets a review by Gemini through the Antigravity CLI (`agy`, the owner's Google AI Pro plan),
+run headless by Claude on Bastet:
+
+1. `git worktree add --detach ~/claude/fumora-review origin/<branch>`; `git diff origin/main...HEAD >
+   REVIEW_DIFF.patch` in it (that folder is in agy's `trustedWorkspaces`).
+2. `agy -p "$(cat REVIEW_BRIEF.md)" --model gemini-3.8-flash-high --sandbox --output-format json
+   --print-timeout 40m` (brief: real defects only, JSON findings; no file changes, no commands).
+   About 20 minutes for a 1,600-line diff. Use sparingly (once per PR): AI Pro quotas are undocumented.
+3. Claude verifies every finding against the code, fixes the real ones with a regression test that
+   fails on the old code, and posts a PR comment: finding -> fixed / rejected (why) / deferred.
+4. Before a production release, the owner also runs `/code-review ultra`.
+
+First run (PR #29, 2026-10-21): 6 findings, all real, all fixed.
+
 ## Version numbers
 
 `pyproject.toml` and `fumora/__init__.py` (a test keeps them equal). The minor

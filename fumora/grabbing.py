@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from . import convert, naming, settings_store
 from .catalog import folder_for
+from .comicinfo import COLLECTED_TYPES
 from .ddl import DirectClient
 from .downloaders import DownloaderError, QbittorrentClient, SabnzbdClient
 from .importer import log
@@ -244,11 +245,22 @@ def _remove_download_folder(path: str, category: str) -> None:
 
 
 def destination(series: Series, issue: Issue, src: Path, opts: dict) -> Path:
-    """Where `src` goes in the library as `issue`'s file (named by the naming settings)."""
-    name = naming.render(
-        opts["file_template"], naming.context(series, issue), opts["colon"], opts["apostrophes"]
-    )
+    """Where `src` goes in the library as `issue`'s file (named by the naming settings;
+    collected editions use the collected-edition template when one is set)."""
+    template = opts["file_template"]
+    if opts.get("collected_template") and series.series_type in COLLECTED_TYPES:
+        template = opts["collected_template"]
+    name = naming.render(template, naming.context(series, issue), opts["colon"], opts["apostrophes"])
     return Path(series.path) / f"{name}{src.suffix.lower()}"
+
+
+def name_taken(dest: Path, src: Path) -> bool:
+    """True if placing `src` at `dest` (or its .cbz once converted) would overwrite
+    another file. `src` already sitting at `dest` is not a clash with itself."""
+    for target in {dest, dest.with_suffix(".cbz")}:
+        if target.exists() and target.resolve() != src.resolve():
+            return True
+    return False
 
 
 def place_issue_file(
@@ -263,9 +275,9 @@ def place_issue_file(
         series.path = folder_for(db, series)
     dest = destination(series, issue, src, opts)
     # A file already sitting at its own name (e.g. unlinked in the series folder) is just linked.
-    in_place = dest.exists() and dest.resolve() == src.resolve()
-    if not in_place and (dest.exists() or dest.with_suffix(".cbz").exists()):
+    if name_taken(dest, src):
         return None, f"{dest.with_suffix('.cbz').name} already exists"
+    in_place = dest.exists() and dest.resolve() == src.resolve()
     # The folder scan may know the file already (not linked to an issue).
     known = db.scalar(select(File).where(File.path == str(src), File.issue_id.is_(None)))
     if in_place and not convert.needs_conversion(src):

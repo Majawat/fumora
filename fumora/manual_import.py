@@ -30,7 +30,7 @@ from sqlalchemy.orm import Session, selectinload
 from . import cbz, convert, settings_store
 from .catalog import folder_for
 from .comicinfo import COLLECTED_TYPES
-from .grabbing import IMPORT_EXTS, destination, place_issue_file, tags_on_import
+from .grabbing import IMPORT_EXTS, destination, name_taken, place_issue_file, tags_on_import
 from .importer import log
 from .jobs import JobContext
 from .library_jobs import naming_settings
@@ -85,16 +85,22 @@ def roots(db: Session) -> list[str]:
     return [os.path.realpath(r.strip()) for r in raw.split(",") if r.strip()]
 
 
-def check_path(db: Session, path: str) -> str:
-    """The real path, if it's under one of the import folders."""
+def within_roots(db: Session, path: str) -> str:
+    """The real path, if it's under one of the import folders (it may not exist)."""
     if not path:
         raise ImportPathError("Enter a folder to import from.")
     # normpath after realpath: symlinks resolved, then the form CodeQL's path check expects.
     real = os.path.normpath(os.path.realpath(path))
     allowed = roots(db)
-    root = next((r for r in allowed if real[len(r) : len(r) + 1] in ("", "/") and real[: len(r)] == r), None)
+    root = next((r for r in allowed if real == r or real.startswith(r.rstrip("/") + "/")), None)
     if root is None or not real.startswith(root):
         raise ImportPathError(f"{path} isn't under an import folder ({', '.join(allowed)}; see Settings).")
+    return real
+
+
+def check_path(db: Session, path: str) -> str:
+    """The real path of an existing file or folder under one of the import folders."""
+    real = within_roots(db, path)
     if not os.path.exists(real):
         raise ImportPathError(f"{path} doesn't exist.")
     return real
@@ -126,9 +132,10 @@ def read_embedded(path: Path) -> Embedded:
     """ComicInfo.xml / MetronInfo.xml inside the file, if it has them."""
     e = Embedded()
     try:
-        if cbz.is_cbz(path):
+        kind = convert.sniff(path)  # by content: a RAR named .cbz is still a RAR
+        if kind == "zip":
             ci, mi, _pages = cbz.read_metadata(path)
-        elif path.suffix.lower() != ".pdf" and convert.needs_conversion(path):
+        elif kind in ("rar", "7z", "tar"):
             ci, mi = convert.read_member(path, cbz.COMICINFO), convert.read_member(path, cbz.METRONINFO)
         else:
             return e
@@ -269,8 +276,7 @@ def check(db: Session, p: Proposal, series: Series | None, issue: Issue | None, 
             series.path = folder_for(db, series)
         dest = destination(series, issue, Path(p.path), opts)
         p.dest = str(dest.with_suffix(".cbz"))
-        same = dest.exists() and dest.resolve() == Path(p.path).resolve()
-        if not same and (dest.exists() or dest.with_suffix(".cbz").exists()):
+        if name_taken(dest, Path(p.path)):
             p.problem = f"{dest.with_suffix('.cbz').name} already exists."
 
 
@@ -360,6 +366,8 @@ def _import_one(sf, path: str, issue_id: int, keep: bool, tag_on: bool) -> str |
                 )
                 db.commit()
                 return None
-        log(db, f"Skipped {src.name}: {problem}", kind="import", level="warning", issue_id=issue_id)
+        # An issue deleted meanwhile can't be referenced (the event's foreign key).
+        log(db, f"Skipped {src.name}: {problem}", kind="import", level="warning",
+            issue_id=issue_id if issue is not None else None)  # fmt: skip
         db.commit()
         return problem
