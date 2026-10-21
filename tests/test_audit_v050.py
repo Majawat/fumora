@@ -457,3 +457,114 @@ def test_38_try_another_on_a_pack_searches_every_issue(app, tmp_path, logged_in)
     assert started == [{"issue_ids": ids}]
     with app.state.session_factory() as db:
         assert db.get(Grab, gid).state == "removed"
+
+
+# --- structure and tests ------------------------------------------------------------------
+
+
+async def test_41_a_second_job_of_a_kind_is_refused_not_dropped(app, logged_in):
+    import asyncio
+
+    from fumora.jobs import JobBusy, JobRunner
+
+    runner = JobRunner(app.state.session_factory)
+    gate = asyncio.Event()
+
+    async def slow(ctx):
+        await gate.wait()
+        return "ok"
+
+    runner.register("slow", slow)
+    runner.start("slow", {"series_ids": [1]})
+    with pytest.raises(JobBusy):
+        runner.start("slow", {"series_ids": [2]})  # was silently folded into job 1
+    gate.set()
+    await runner.shutdown()
+
+    app.state.jobs.start = lambda kind, params=None: (_ for _ in ()).throw(JobBusy(kind, 7))
+    # Accepting suggestions while an import runs used to be folded into it and lost.
+    r = logged_in.post("/import/accept-suggestions", follow_redirects=False)
+    assert r.status_code == 409 and "already running" in r.text
+
+
+def test_44_only_the_newest_job_of_a_kind_resumes(app):
+    from fumora.jobs import JobRunner
+    from fumora.models import Job
+
+    with app.state.session_factory() as db:
+        db.add_all([Job(kind="k", state="running", params={}), Job(kind="k", state="queued", params={})])
+        db.commit()
+    runner = JobRunner(app.state.session_factory)
+    spawned = []
+    runner._spawn = lambda job_id, kind: spawned.append(job_id)
+    runner.resume_all()
+    with app.state.session_factory() as db:
+        jobs = db.scalars(select(Job).order_by(Job.id)).all()
+        assert spawned == [jobs[1].id] and jobs[0].state == "cancelled"
+
+
+async def test_45_a_cancelled_job_counts_as_stopped_only_after_its_file_work(app):
+    import asyncio
+    import threading
+
+    from fumora.jobs import JobRunner
+
+    runner = JobRunner(app.state.session_factory)
+    release, finished = threading.Event(), []
+
+    def file_work():
+        release.wait(5)
+        finished.append(True)
+
+    async def job(ctx):
+        await ctx.thread(file_work)
+
+    runner.register("files", job)
+    job_id = runner.start("files")
+    await asyncio.sleep(0.05)
+    runner.cancel(job_id)
+    await asyncio.sleep(0.05)
+    assert runner.active("files") is not None  # still running: its thread hasn't finished
+    release.set()
+    for _ in range(100):
+        if runner.active("files") is None:
+            break
+        await asyncio.sleep(0.02)
+    assert finished and runner.active("files") is None
+
+
+@respx.mock
+async def test_57_a_failed_download_asks_for_a_new_search(app, tmp_path):
+    from fumora.grabbing import check_downloads
+
+    _setup(app, tmp_path, numbers=("16",))
+    respx.get(f"{SAB}/api", params={"mode": "queue"}).respond(200, json={"queue": {"slots": []}})
+    respx.get(f"{SAB}/api", params={"mode": "history"}).respond(200, json={"history": {"slots": [
+        {"nzo_id": "n1", "status": "Failed", "fail_message": "CRC error"}]}})  # fmt: skip
+    asked = []
+    with app.state.session_factory() as db:
+        issue_id = _abs(db, "16").id
+        _grab_row(db, [issue_id], client_job_id="n1")
+    await check_downloads(app.state.session_factory, on_failed=asked.extend)
+    assert asked == [issue_id]
+
+
+def test_59_organize_moves_the_files_recorded_in_a_renamed_folder(app, tmp_path):
+    from tests.test_scanner_naming import _series
+
+    old = tmp_path / "Dallas"
+    old.mkdir()
+    f = make_cbz(old / "Umbrella Academy Dallas 001 (2008).cbz")
+    with app.state.session_factory() as db:
+        s = _series(db, old)
+        s.issues = [
+            Issue(number="1", cover_date=date(2008, 11, 1), locked_fields=[], files=[File(path=str(f))])
+        ]
+        db.flush()
+        plan = naming.plan_series(s)
+        assert naming.apply_plan(db, s, plan)[0] >= 1
+        moved = s.issues[0].files[0].path
+        assert moved == str(
+            tmp_path / "Umbrella Academy Dallas (2008)" / "Umbrella Academy Dallas 001 (2008).cbz"
+        )
+        assert os.path.exists(moved) and s.path == str(tmp_path / "Umbrella Academy Dallas (2008)")

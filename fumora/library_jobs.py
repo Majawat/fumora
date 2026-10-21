@@ -159,7 +159,7 @@ def make_retag_handler(
                             counts["hardlinked"] += 1
                             continue
                         # File I/O off the event loop: archives can be large.
-                        result = await asyncio.to_thread(tag_file, issue, f, dry_run, recycle)
+                        result = await ctx.thread(tag_file, issue, f, dry_run, recycle)
                         if result["error"]:
                             counts["errors"] += 1
                         elif result["fields"]:
@@ -220,7 +220,7 @@ def make_organize_handler():
                 plan = naming.plan_series(series, shared_folder=series.path in shared, **opts)
                 # apply_plan updates the database after each successful rename and
                 # reports the rest, so the database always matches the disk.
-                done_count, skipped = await asyncio.to_thread(naming.apply_plan, db, series, plan)
+                done_count, skipped = await ctx.thread(naming.apply_plan, db, series, plan)
                 renamed += done_count
                 problems += [f"{series.name}: {p}" for p in skipped]
                 db.commit()

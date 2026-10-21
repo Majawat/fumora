@@ -339,7 +339,8 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
 
     @app.post("/import/start", response_class=HTMLResponse)
     async def import_start(request: Request, db: Session = Depends(get_db)):
-        app.state.jobs.start(MYLAR_IMPORT)
+        if app.state.jobs.active(MYLAR_IMPORT) is None:  # running already: just show its progress
+            app.state.jobs.start(MYLAR_IMPORT)
         return templates.TemplateResponse(request, "_import_status.html", status_context(db))
 
     @app.get("/import/status", response_class=HTMLResponse)

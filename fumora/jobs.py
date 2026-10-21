@@ -17,10 +17,34 @@ from .models import Event, Job
 log = logging.getLogger("fumora.jobs")
 
 
+class JobBusy(Exception):
+    """A job of this kind is already running: the new request was not started."""
+
+    def __init__(self, kind: str, job_id: int):
+        super().__init__(
+            f"A {kind} job is already running (job {job_id}); try again when it finishes (Jobs)."
+        )
+        self.kind, self.job_id = kind, job_id
+
+
 class JobContext:
     def __init__(self, job_id: int, session_factory: sessionmaker):
         self.job_id = job_id
         self.session_factory = session_factory
+        self._threads: set[asyncio.Future] = set()
+
+    async def thread(self, fn, *args):
+        """Run blocking work (file moves, tagging) off the event loop. Unlike a bare
+        asyncio.to_thread, a cancelled job waits for it to finish before it counts as
+        stopped, so a new job can't start on the same files while it still runs."""
+        fut = asyncio.ensure_future(asyncio.to_thread(fn, *args))
+        self._threads.add(fut)
+        fut.add_done_callback(self._threads.discard)
+        return await asyncio.shield(fut)
+
+    async def settle(self) -> None:
+        if self._threads:
+            await asyncio.gather(*self._threads, return_exceptions=True)
 
     def update(self, **fields) -> None:
         with self.session_factory() as db:
@@ -60,10 +84,11 @@ class JobRunner:
             return db.scalar(select(Job).where(Job.kind == kind).order_by(Job.id.desc()))
 
     def start(self, kind: str, params: dict | None = None) -> int:
-        """Start a job, or return the one of this kind already running."""
+        """Start a job. One job of a kind runs at a time: while one runs, JobBusy is
+        raised (the request is never silently folded into the running job)."""
         existing = self.active(kind)
         if existing is not None:
-            return existing.id
+            raise JobBusy(kind, existing.id)
         with self.session_factory() as db:
             job = Job(kind=kind, state="queued", params=params or {})
             db.add(job)
@@ -74,9 +99,18 @@ class JobRunner:
 
     def resume_all(self) -> None:
         with self.session_factory() as db:
-            jobs = db.scalars(select(Job).where(Job.state.in_(("queued", "running")))).all()
-            pending = [(j.id, j.kind) for j in jobs]
-        for job_id, kind in pending:
+            jobs = db.scalars(
+                select(Job).where(Job.state.in_(("queued", "running"))).order_by(Job.id.desc())
+            ).all()
+            latest: dict[str, int] = {}
+            for job in jobs:  # one per kind, the newest; any older one is not resumed
+                if job.kind in latest:
+                    job.state, job.finished = "cancelled", datetime.now(UTC)
+                    job.message = f"Not resumed: job {latest[job.kind]} of the same kind was newer"
+                else:
+                    latest[job.kind] = job.id
+            db.commit()
+        for kind, job_id in latest.items():
             self._spawn(job_id, kind)
 
     def cancel(self, job_id: int) -> bool:
@@ -116,6 +150,7 @@ class JobRunner:
         try:
             summary = await handler(ctx)
         except asyncio.CancelledError:
+            await ctx.settle()  # blocking work already under way finishes first
             if job_id in self._cancel_requested:
                 self._cancel_requested.discard(job_id)
                 ctx.update(state="cancelled", finished=datetime.now(UTC), message="Cancelled")

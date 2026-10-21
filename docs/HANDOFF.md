@@ -31,6 +31,7 @@ Jinja2 + htmx. Image: `ghcr.io/majawat/fumora:edge` (built from `main`).
 | M5a GetComics + Anna's Archive (via Shelfmark) | merged 2026-10-20 | #27 |
 | M5b other sources: ComicVine refresh, move to Metron, add from ComicVine, reading direction, Metron gaps page | merged 2026-10-20 | #28 |
 | M5c: full tags at import (#24: Metron or ComicVine issue record first), Import files page (manual import), permissions, version 0.5.0 | merged 2026-10-21, tagged v0.5.0 | #29 |
+| 0.5.1: fixes from the full Gemini audit of v0.5.0 (41 real findings) | PR open, branch `audit-fixes` | — |
 | M5 rest: TPB fallback (TPB = own series; grab only when single issues aren't available), GCD ratings via the GCD API (needs the owner's GCD account), manual series, split/join, notifications (back burner) | not started | — |
 | M6 side-by-side week with Mylar, cut over | not started | — |
 
@@ -185,6 +186,15 @@ run headless by Claude on Bastet:
 4. Before a production release, the owner also runs `/code-review ultra`.
 
 First run (PR #29, 2026-10-21): 6 findings, all real, all fixed.
+
+**Full audit** (once per milestone and before a production release): six area briefs (file safety,
+downloads, metadata, web/security, structure, tests) in `.audit/` of a plain `git archive` export
+(not a worktree: agy wanders into `.git` outside the folder and a denied read ends the run with nothing).
+`~/.gemini/antigravity-cli/settings.json` allows `read_file` only for the review folder and agy's own
+`brain`/`builtin` folders. Check each run's JSON for `denied_actions` / an empty response: agy reports
+SUCCESS even then. First audit (v0.5.0, 2026-10-21): 61 findings: 41 real (fixed in 0.5.1 with tests that
+fail on v0.5.0, `tests/test_audit_v050.py`), 7 duplicates, 13 wrong (mostly the tests pass claiming
+existing tests don't exist; its findings need the most checking).
 
 ## Version numbers
 
