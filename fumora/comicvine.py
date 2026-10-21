@@ -25,6 +25,11 @@ RATE_LIMITED_WAIT = 3600.0  # ComicVine's window is an hour
 MAX_RETRIES = 3
 PAGE = 100
 VOLUME_PREFIX = "4050-"
+ISSUE_PREFIX = "4000-"
+ISSUE_FIELDS = (
+    "id,name,description,person_credits,character_credits,team_credits,story_arc_credits,"
+    "location_credits,date_last_updated,site_detail_url"
+)
 
 log = logging.getLogger("fumora.comicvine")
 
@@ -119,6 +124,11 @@ class ComicVineClient:
             f"volume/{VOLUME_PREFIX}{cv_id}/",
             {"field_list": "id,name,start_year,publisher,count_of_issues,site_detail_url,deck"},
         )
+        return data.get("results") or None
+
+    async def issue(self, cv_issue_id: int) -> dict | None:
+        """One issue's full record: credits, characters, teams, arcs, description."""
+        data = await self._get(f"issue/{ISSUE_PREFIX}{cv_issue_id}/", {"field_list": ISSUE_FIELDS})
         return data.get("results") or None
 
     async def volume_issues(self, cv_id: int) -> AsyncIterator[dict]:

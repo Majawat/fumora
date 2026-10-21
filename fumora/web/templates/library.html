@@ -37,8 +37,8 @@
   </form>
 </section>
 
-<h2>Files without full Metron tags ({{ untagged|length }} series)</h2>
-<p class="muted">Issues with a file but no Metron match: they get basic tags only (series, number, rating). Fix by matching the series, or adding the issues to Metron.</p>
+<h2>Files with basic tags only ({{ untagged|length }} series)</h2>
+<p class="muted">Issues with a file but no Metron match and no ComicVine id: they get basic tags only (series, number, rating). Fix by matching the series, adding the issues to Metron, or refreshing the series from ComicVine.</p>
 {% if untagged %}
 <div class="scroll">
 <table class="log">

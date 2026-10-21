@@ -68,7 +68,7 @@ def search_due(now: datetime, enabled: str | None, every_hours: str | None, last
     return (now - datetime.fromisoformat(last)).total_seconds() >= hours * 3600
 
 
-async def run_download_monitor(session_factory, jobs=None, every: int = 60) -> None:
+async def run_download_monitor(session_factory, jobs=None, every: int = 60, before_import=None) -> None:
     """Follow downloads every minute and import the finished ones; a failed one
     starts a new search for its issue (see grabbing.retry_candidates)."""
 
@@ -82,7 +82,7 @@ async def run_download_monitor(session_factory, jobs=None, every: int = 60) -> N
 
     while True:
         try:
-            await check_downloads(session_factory, on_failed=search_again)
+            await check_downloads(session_factory, on_failed=search_again, before_import=before_import)
         except Exception:
             log.exception("download check failed")
         await asyncio.sleep(every)

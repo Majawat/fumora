@@ -38,3 +38,12 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  container-smoke:
+    # The real image, started the way Unraid runs it (99:100, umask 0002, /data read-only
+    # then read-write): fails if the app runs as root or writes files the users group can't use.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build and run the container smoke test
+        run: tests/container/smoke.sh

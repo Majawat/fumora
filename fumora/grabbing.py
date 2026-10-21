@@ -29,12 +29,14 @@ from sqlalchemy.orm import Session, selectinload
 
 from . import convert, naming, settings_store
 from .catalog import folder_for
+from .comicinfo import COLLECTED_TYPES
 from .ddl import DirectClient
 from .downloaders import DownloaderError, QbittorrentClient, SabnzbdClient
 from .importer import log
 from .library_jobs import naming_settings
 from .models import Blocklist, File, Grab, Issue, Series
 from .numbers import normalize_number
+from .perms import normalize
 from .scanner import COMIC_EXTS, parse_issue_number
 from .search import Candidate
 from .shelfmark import ShelfmarkClient
@@ -242,6 +244,79 @@ def _remove_download_folder(path: str, category: str) -> None:
         pass
 
 
+def destination(series: Series, issue: Issue, src: Path, opts: dict) -> Path:
+    """Where `src` goes in the library as `issue`'s file (named by the naming settings;
+    collected editions use the collected-edition template when one is set)."""
+    template = opts["file_template"]
+    if opts.get("collected_template") and series.series_type in COLLECTED_TYPES:
+        template = opts["collected_template"]
+    name = naming.render(template, naming.context(series, issue), opts["colon"], opts["apostrophes"])
+    return Path(series.path) / f"{name}{src.suffix.lower()}"
+
+
+def name_taken(dest: Path, src: Path) -> bool:
+    """True if placing `src` at `dest` (or its .cbz once converted) would overwrite
+    another file. `src` already sitting at `dest` is not a clash with itself."""
+    for target in {dest, dest.with_suffix(".cbz")}:
+        if target.exists() and target.resolve() != src.resolve():
+            return True
+    return False
+
+
+def place_issue_file(
+    db: Session, series: Series, issue: Issue, src: Path, keep_original: bool, opts: dict
+) -> tuple[File | None, str | None]:
+    """Name and place `src` as `issue`'s file: hardlink (keep_original) or move,
+    converting CBR/CB7/CBT/PDF to CBZ. Returns the new File, or None and why not.
+    Never overwrites: an issue with a file, or a taken name, is skipped."""
+    if issue.files:
+        return None, f"#{issue.number} already has a file"
+    if not series.path:
+        series.path = folder_for(db, series)
+    dest = destination(series, issue, src, opts)
+    # A file already sitting at its own name (e.g. unlinked in the series folder) is just linked.
+    if name_taken(dest, src):
+        return None, f"{dest.with_suffix('.cbz').name} already exists"
+    in_place = dest.exists() and dest.resolve() == src.resolve()
+    # The folder scan may know the file already (not linked to an issue).
+    known = db.scalar(select(File).where(File.path == str(src), File.issue_id.is_(None)))
+    if in_place and not convert.needs_conversion(src):
+        placed = src
+    elif convert.needs_conversion(src):
+        placed = _place_converted(src, dest)
+        if not keep_original:
+            src.unlink(missing_ok=True)  # the source's own copy, now converted
+    else:
+        placed = _place(src, dest, "torrent" if keep_original else "usenet")
+    if not (keep_original and placed != src and not convert.needs_conversion(src)):
+        # Moved in or newly converted: Fumora's own permissions, not the other
+        # program's. A hardlink is the torrent client's seeding file: left alone.
+        normalize(placed)
+    if known is not None and (placed == src or not keep_original):
+        known.path, known.size = str(placed), placed.stat().st_size
+        row = known
+    else:
+        row = File(path=str(placed), size=placed.stat().st_size)
+    issue.files.append(row)
+    db.commit()  # the file is in the library now: record it whatever happens next
+    return row, None
+
+
+def tags_on_import(db: Session, protocol: str) -> bool:
+    """Imports are tagged (torrents only when asked: tagging rewrites the seeded file)."""
+    if protocol == "torrent":
+        return (settings_store.get(db, "import.tag_torrents") or "off") == "on"
+    return (settings_store.get(db, "import.tag") or "on") == "on"
+
+
+def _wants_records(db: Session, g: Grab) -> list[int]:
+    """Issues of this grab whose import will write tags (see details.DetailFetcher)."""
+    if not tags_on_import(db, g.protocol):
+        return []
+    series = db.scalar(select(Series).join(Issue).where(Issue.id == g.issue_id)) if g.issue_id else None
+    return list(dict.fromkeys(g.issue_ids or [g.issue_id])) if series is not None and series.writable else []
+
+
 def import_grab(db: Session, g: Grab, path: str) -> str:
     """Import a finished download. Returns a one-line summary."""
     issues = {
@@ -263,8 +338,7 @@ def import_grab(db: Session, g: Grab, path: str) -> str:
 
     opts = naming_settings(db)
     recycle = settings_store.get(db, "library.recycle_path") or "/data/media/fumora-recycle"
-    tag_usenet = (settings_store.get(db, "import.tag") or "on") == "on"
-    tag_torrent = (settings_store.get(db, "import.tag_torrents") or "off") == "on"
+    tags_on = tags_on_import(db, g.protocol)
     imported, skipped = [], []
     for f in files:
         if len(files) == 1 and len(issues) == 1:
@@ -276,26 +350,14 @@ def import_grab(db: Session, g: Grab, path: str) -> str:
         if issue is None:
             skipped.append(f"{f.name}: no matching issue")
             continue
-        if issue.files:
-            skipped.append(f"{f.name}: #{issue.number} already has a file")
-            continue
-        name = naming.render(
-            opts["file_template"], naming.context(series, issue), opts["colon"], opts["apostrophes"]
+        # A torrent keeps seeding its original: hardlink it (or convert a copy).
+        row, problem = place_issue_file(
+            db, series, issue, f, keep_original=g.protocol == "torrent", opts=opts
         )
-        dest = Path(series.path) / f"{name}{f.suffix.lower()}"
-        if dest.exists() or dest.with_suffix(".cbz").exists():
-            skipped.append(f"{f.name}: {dest.with_suffix('.cbz').name} already exists")
+        if row is None:
+            skipped.append(f"{f.name}: {problem}")
             continue
-        if convert.needs_conversion(f):
-            placed = _place_converted(f, dest)
-            if g.protocol != "torrent":  # a torrent keeps seeding its original
-                f.unlink(missing_ok=True)  # the download's own copy, now converted
-        else:
-            placed = _place(f, dest, g.protocol)
-        row = File(path=str(placed), size=placed.stat().st_size)
-        issue.files.append(row)
-        db.commit()  # the file is in the library now: record it whatever happens next
-        if series.writable and (tag_torrent if g.protocol == "torrent" else tag_usenet):
+        if series.writable and tags_on:
             tag_file(issue, row, dry_run=False, recycle_dir=recycle)
             db.commit()
         imported.append(f"#{issue.number}")
@@ -345,10 +407,19 @@ def retry_candidates(db: Session, g: Grab) -> list[int]:
     return list(dict.fromkeys(g.issue_ids or [g.issue_id])) if failures <= MAX_RETRIES_PER_DAY else []
 
 
-async def check_downloads(session_factory, on_failed=None) -> int:
+async def check_downloads(session_factory, on_failed=None, before_import=None) -> int:
     """Poll active grabs; import finished ones. Returns how many changed state.
     on_failed(issue_ids) is called with issues whose download failed and that
-    should be searched again (see retry_candidates)."""
+    should be searched again (see retry_candidates). before_import(session_factory,
+    issue_ids) is awaited before an import that writes tags: it fetches the
+    issues' full records (details.DetailFetcher.fetch)."""
+
+    async def records(g: Grab) -> None:
+        if before_import is not None:
+            ids = _wants_records(db, g)
+            if ids:
+                await before_import(session_factory, ids)
+
     changed = 0
     retry: list[int] = []
     with session_factory() as db:
@@ -362,6 +433,7 @@ async def check_downloads(session_factory, on_failed=None) -> int:
                     # An import cut short (e.g. a restart): run it again from the saved path.
                     _importing.add(g.id)
                     try:
+                        await records(g)
                         await asyncio.to_thread(_import_in_thread, session_factory, g.id, g.path or "")
                     finally:
                         _importing.discard(g.id)
@@ -389,6 +461,7 @@ async def check_downloads(session_factory, on_failed=None) -> int:
                     db.commit()
                     _importing.add(g.id)
                     try:
+                        await records(g)
                         await asyncio.to_thread(_import_in_thread, session_factory, g.id, st.path or "")
                     finally:
                         _importing.discard(g.id)

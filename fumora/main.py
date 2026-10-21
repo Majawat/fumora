@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -18,25 +19,30 @@ from .comicvine import make_limiter as make_cv_limiter
 from .config import Config, load_config
 from .db import make_engine, make_session_factory, upgrade_db
 from .ddl import DirectClient
+from .details import DetailFetcher
 from .downloaders import DownloaderError
 from .getcomics import GetComicsClient, GetComicsError
 from .import_job import KIND as MYLAR_IMPORT
 from .import_job import make_handler as make_import_handler
 from .jobs import JobRunner
 from .library_jobs import ORGANIZE, RETAG, SCAN, make_organize_handler, make_retag_handler, make_scan_handler
+from .manual_import import MANUAL_IMPORT, make_manual_import_handler
 from .metron import MetronAuthError, MetronClient, MetronError, RateLimiter
 from .models import Event, Issue, Series, User
+from .perms import folder_problems
 from .refresh import REFRESH, make_refresh_handler
 from .scheduler import ensure_refresh_time, run_download_monitor, run_scheduler
 from .shelfmark import ShelfmarkClient, ShelfmarkError
 from .sources import CV_REFRESH, make_cv_refresh_handler
 from .web.catalog_routes import register_catalog_routes
+from .web.import_routes import register_import_routes
 from .web.library import register_library_routes
 from .web.library_admin import register_admin_routes
 from .web.monitor_routes import register_monitor_routes
 from .web.search_routes import register_search_routes
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
+log = logging.getLogger("fumora")
 PUBLIC_PATHS = ("/static/", "/login", "/setup", "/api/health")
 
 
@@ -69,7 +75,6 @@ def create_app(config: Config | None = None) -> FastAPI:
     jobs = JobRunner(SessionLocal)
     jobs.register(MYLAR_IMPORT, make_import_handler(config.config_dir, make_metron_client))
     jobs.register(SCAN, make_scan_handler())
-    jobs.register(RETAG, make_retag_handler(make_metron_client))
     jobs.register(ORGANIZE, make_organize_handler())
     jobs.register(REFRESH, make_refresh_handler(make_metron_client))
     jobs.register(SEARCH, make_search_handler())
@@ -81,18 +86,26 @@ def create_app(config: Config | None = None) -> FastAPI:
         return ComicVineClient(api_key, comicvine_limiter)
 
     jobs.register(CV_REFRESH, make_cv_refresh_handler(make_cv_client))
+    jobs.register(RETAG, make_retag_handler(make_metron_client, make_cv_client))
+    # Full issue records just before an import, so new files get full tags (#24).
+    details = DetailFetcher(make_metron_client, metron_limiter, make_cv_client, comicvine_limiter)
+    jobs.register(MANUAL_IMPORT, make_manual_import_handler(details.fetch))
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         with SessionLocal() as db:
             ensure_refresh_time(db)
             ensure_refresh_time(db, key="schedule.cv_refresh_time")
+            for problem in folder_problems(db, config.config_dir):
+                log.warning(problem)
         jobs.resume_all()
         tasks = []
         if config.scheduler:
             tasks.append(asyncio.create_task(run_scheduler(SessionLocal, jobs)))
         if config.download_monitor:
-            tasks.append(asyncio.create_task(run_download_monitor(SessionLocal, jobs)))
+            tasks.append(
+                asyncio.create_task(run_download_monitor(SessionLocal, jobs, before_import=details.fetch))
+            )
         yield
         for t in tasks:
             t.cancel()
@@ -212,10 +225,11 @@ def create_app(config: Config | None = None) -> FastAPI:
         }
         events = db.scalars(select(Event).order_by(Event.ts.desc()).limit(20)).all()
         metron_ready = settings_store.metron_ready(db)
+        problems = folder_problems(db, config.config_dir)
         return templates.TemplateResponse(
             request,
             "dashboard.html",
-            {"stats": stats, "events": events, "metron_ready": metron_ready},
+            {"stats": stats, "events": events, "metron_ready": metron_ready, "problems": problems},
         )
 
     def settings_context(db: Session, saved: list[str] | None = None) -> dict:
@@ -325,6 +339,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     register_monitor_routes(app, templates, get_db)
     register_catalog_routes(app, templates, get_db)
     register_search_routes(app, templates, get_db)
+    register_import_routes(app, templates, get_db)
 
     @app.get("/api/health")
     def health():

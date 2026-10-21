@@ -1,6 +1,7 @@
 """Background jobs that work on library files: scan, retag, organize."""
 
 import asyncio
+import contextlib
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -9,18 +10,29 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 
 from . import naming, settings_store
+from .comicvine import ComicVineAuthError, ComicVineError, ComicVineRateLimited
 from .importer import log
 from .jobs import JobContext
 from .metron import MetronAuthError, MetronClient, MetronError, MetronPause, _open
 from .models import Issue, Series
 from .scanner import scan_folders
-from .tagging import ensure_detail, tag_file
+from .tagging import ensure_cv_detail, ensure_detail, tag_file
 
 SCAN, RETAG, ORGANIZE = "scan", "retag", "organize"
 
 
 def _series_ids(ctx: JobContext) -> list[int]:
     return list(ctx.params().get("series_ids") or [])
+
+
+@contextlib.asynccontextmanager
+async def _maybe(client):
+    """`async with` a client that may be missing."""
+    if client is None:
+        yield None
+        return
+    async with client:
+        yield client
 
 
 def make_scan_handler():
@@ -40,7 +52,9 @@ def make_scan_handler():
     return run
 
 
-def make_retag_handler(make_client: Callable[[str, str], MetronClient]):
+def make_retag_handler(
+    make_client: Callable[[str, str], MetronClient], make_cv_client: Callable | None = None
+):
     async def run(ctx: JobContext) -> str:
         params = ctx.params()
         dry_run = bool(params.get("dry_run", True))
@@ -49,6 +63,7 @@ def make_retag_handler(make_client: Callable[[str, str], MetronClient]):
         with sf() as db:
             user, password, token = settings_store.metron_login(db)
             recycle = settings_store.get(db, "library.recycle_path")
+            cv_key = settings_store.get(db, "comicvine.api_key")
             q = select(Issue.id).join(Series).where(Issue.files.any()).order_by(Series.id, Issue.sort_number)
             if ids:
                 q = q.where(Series.id.in_(ids))
@@ -64,7 +79,9 @@ def make_retag_handler(make_client: Callable[[str, str], MetronClient]):
         todo = [i for i in issue_ids if i not in done_set]
         ctx.update(phase="preview" if dry_run else "write", progress=len(done), total=len(issue_ids))
         counts = {"changed": 0, "unchanged": 0, "errors": 0}
-        async with _open(make_client, user, password, token) as client:
+        # Series Metron doesn't have get ComicVine's issue record instead.
+        cv = make_cv_client(cv_key) if cv_key and make_cv_client is not None else None
+        async with _open(make_client, user, password, token) as client, _maybe(cv):
             for n, issue_id in enumerate(todo, len(done) + 1):
                 with sf() as db:
                     issue = db.scalar(
@@ -99,6 +116,21 @@ def make_retag_handler(make_client: Callable[[str, str], MetronClient]):
                                 level="error",
                             )
                             break
+                    if cv is not None and issue.metron_id is None and issue.cv_id:
+                        try:
+                            await ensure_cv_detail(db, cv, issue)
+                        except ComicVineAuthError:
+                            raise
+                        except ComicVineRateLimited as exc:
+                            log(db, f"{exc}; the rest get basic tags", kind="retag", level="error")
+                            cv = None
+                        except ComicVineError as exc:
+                            log(
+                                db,
+                                f"No ComicVine detail for issue {issue_id}: {exc}",
+                                kind="retag",
+                                level="error",
+                            )
                     for f in issue.files:
                         # File I/O off the event loop: archives can be large.
                         result = await asyncio.to_thread(tag_file, issue, f, dry_run, recycle)

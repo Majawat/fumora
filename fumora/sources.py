@@ -73,6 +73,10 @@ def apply_cv_issues(db: Session, series: Series, cv_issues: list[dict]) -> dict[
         issue, created = listed_issue(db, series, by_number, number, store or cover)
         if issue.cv_id is None:
             issue.cv_id = ci.get("id")
+        updated = ci.get("date_last_updated")
+        if issue.cv_detail and issue.cv_id == ci.get("id") and updated:
+            if updated != issue.cv_detail.get("date_last_updated"):
+                issue.cv_detail = None  # ComicVine changed it: fetched again before the next tagging
         changed = apply_listed_values(
             issue, {"cover_date": cover, "store_date": store, "title": ci.get("name")}
         )

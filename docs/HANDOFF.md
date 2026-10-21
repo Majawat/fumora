@@ -30,7 +30,8 @@ Jinja2 + htmx. Image: `ghcr.io/majawat/fumora:edge` (built from `main`).
 | PDF → CBZ (extract page images or render at 300 dpi) | merged 2026-10-18 | #26 |
 | M5a GetComics + Anna's Archive (via Shelfmark) | merged 2026-10-20 | #27 |
 | M5b other sources: ComicVine refresh, move to Metron, add from ComicVine, reading direction, Metron gaps page | merged 2026-10-20 | #28 |
-| M5 rest: TPB links, GCD ratings, full tags at import (#24), manual series, split/join | not started | — |
+| M5c: full tags at import (#24: Metron or ComicVine issue record first), Import files page (manual import), permissions, version 0.5.0 | merged 2026-10-21, tagged v0.5.0 | #29 |
+| M5 rest: TPB fallback (TPB = own series; grab only when single issues aren't available), GCD ratings via the GCD API (needs the owner's GCD account), manual series, split/join, notifications (back burner) | not started | — |
 | M6 side-by-side week with Mylar, cut over | not started | — |
 
 ### Where M4 part 2 stands
@@ -154,12 +155,52 @@ Design: the doc's "Other metadata sources", "Moving a series to Metron", "Manga"
   ComicVine key from Mylar's config; Mieruko-chan (id 15) is source cv.
   Helper: `/mnt/user/appdata/fumora-test/m5b_run.py cv|metron`.
 
+## Permissions (checked 2026-10-20)
+
+- Both containers run the app as 99:100 with umask 0002 (`/proc/1/status`).
+- Everything Fumora places, moves in, unpacks or converts is set to 664/775 (`perms.py`); hardlinked
+  torrent files keep the client's mode (same inode). Before this, moved-in files kept the source
+  program's mode: Shelfmark writes 644 (it has no UMASK set).
+- Folder problems (missing/read-only library or recycle folder, running as root) show on the dashboard
+  and in the startup log. Production currently shows "read-only library" by design (`/data:ro`).
+- `tests/container/smoke.sh` (CI `container-smoke`) runs the real image as Unraid does.
+- Open: on Hathor the running fumora-test container's `fumora.db` goes back to 644 a few seconds after
+  Fumora sets 664 (not reproducible in a fresh container on the same mounts, nor in CI). Harmless:
+  only Fumora writes it and it is nobody:users. Not worth more time unless it starts to matter.
+- Ad-hoc scripts: `docker exec -u 99:100 <c> sh -c 'umask 0002; ...'` (plain `docker exec` uses
+  umask 0022 and root, which is how earlier 644/755 test files appeared).
+
+## Independent review (second AI)
+
+Each PR gets a review by Gemini through the Antigravity CLI (`agy`, the owner's Google AI Pro plan),
+run headless by Claude on Bastet:
+
+1. `git worktree add --detach ~/claude/fumora-review origin/<branch>`; `git diff origin/main...HEAD >
+   REVIEW_DIFF.patch` in it (that folder is in agy's `trustedWorkspaces`).
+2. `agy -p "$(cat REVIEW_BRIEF.md)" --model gemini-3.8-flash-high --sandbox --output-format json
+   --print-timeout 40m` (brief: real defects only, JSON findings; no file changes, no commands).
+   About 20 minutes for a 1,600-line diff. Use sparingly (once per PR): AI Pro quotas are undocumented.
+3. Claude verifies every finding against the code, fixes the real ones with a regression test that
+   fails on the old code, and posts a PR comment: finding -> fixed / rejected (why) / deferred.
+4. Before a production release, the owner also runs `/code-review ultra`.
+
+First run (PR #29, 2026-10-21): 6 findings, all real, all fixed.
+
+## Version numbers
+
+`pyproject.toml` and `fumora/__init__.py` (a test keeps them equal). The minor
+number is the milestone (0.5.x = M5), the patch number counts fix releases
+within it, 1.0.0 is the Mylar cutover (M6). Bump in the PR that changes it;
+after merging, tag `vX.Y.Z` on main: the release workflow then publishes
+`:X.Y.Z`, `:X.Y` and `:latest` images (`:edge` follows main regardless).
+Files record the version in their `<Notes>` ("Tagged by Fumora 0.5.0").
+
 ## Deployments (Hathor, 192.168.9.10)
 
 | Container | Port | Image | Notes |
 | --- | --- | --- | --- |
 | `fumora` (production) | 8792 | `ghcr.io/majawat/fumora:edge` | `/data` mounted **read-only**; scheduler on (daily Metron refresh 05:00 UTC) |
-| `fumora-test` | 8793 | local `fumora:m5b` (branch `m5b-sources`) | `FUMORA_SCHEDULER=0`; writable only `/data/media/comics-test` and `/data/usenet` (downloads + `fumora-test-library`) |
+| `fumora-test` | 8793 | local `fumora:m5c` (branch `m5c-import-tags`) | `FUMORA_SCHEDULER=0`; writable only `/data/media/comics-test` and `/data/usenet` (downloads + `fumora-test-library`) |
 
 Unraid templates: `/boot/config/plugins/dockerMan/templates-user/my-fumora.xml`
 and `my-fumora-test.xml`. Recreate containers with the same `docker run`

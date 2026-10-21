@@ -14,7 +14,7 @@ from tests.test_m2_routes_jobs import _job, _setup
 def test_library_and_jobs_pages(logged_in, app, tmp_path):
     _setup(app, tmp_path, confirmed=None)
     page = logged_in.get("/library").text
-    assert "Matches to confirm" in page and "Files without full Metron tags" in page
+    assert "Matches to confirm" in page and "Files with basic tags only" in page
     assert logged_in.post("/library/retag", data={"write": "true"}).status_code == 400  # no tick
     assert logged_in.get("/jobs").status_code == 200
     assert "No jobs yet" in logged_in.get("/jobs/table").text

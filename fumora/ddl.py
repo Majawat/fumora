@@ -25,6 +25,7 @@ import httpx
 from .convert import ArchiveError, _bsdtar, sniff
 from .downloaders import DownloaderError, DownloadStatus
 from .getcomics import USER_AGENT, GetComicsClient, GetComicsError, Post, is_challenge, parse_post
+from .perms import normalize_tree
 
 logger = logging.getLogger("fumora.ddl")
 COMIC_INSIDE = (".cbz", ".cbr", ".cb7", ".cbt", ".pdf")
@@ -288,5 +289,6 @@ def _unpack(path: Path) -> None:
         if out.returncode != 0:
             raise ArchiveError(f"couldn't unpack {path.name}: {out.stderr.decode(errors='replace')[:200]}")
         path.unlink()
+        normalize_tree(path.parent)  # unpacked files would keep the archive's permissions
     elif kind in ARCHIVE_COMIC_EXT:
         path.rename(path.with_suffix(ARCHIVE_COMIC_EXT[kind]))

@@ -30,4 +30,11 @@ docker compose up --build
 - No integration with Komga or BookOrbit; they folder-watch.
 - Monitoring: `Issue.monitored` is the only stored choice; Wanted/Missing/Unreleased/Downloaded are derived (`monitoring.py`). `Issue.status` is Mylar's legacy value, display only.
 - Metron budget: never page Metron's `modified_gt` change feed (can be 60k+ issues/day). Daily refresh = release schedule + rolling batch (`refresh.py`).
+- Unraid permissions: Fumora runs as PUID:PGID (99:100) with UMASK 0002 and never as root. Everything it
+  creates, moves in, unpacks or converts ends up 664/775 (`perms.normalize`); hardlinked torrent files are
+  left alone. `tests/container/smoke.sh` (CI job `container-smoke`) checks the real image. Ad-hoc scripts in
+  the containers run as `docker exec -u 99:100 <c> sh -c 'umask 0002; ...'`.
+- No silent fallbacks: a missing or read-only folder, a failed login or an invalid setting is said out loud
+  (dashboard notice + log), never quietly worked around. Every setting must do what its label says, with a test.
+- Before debugging a third-party app, read the source of the version that is deployed, not main.
 - Test instance (`fumora-test`, copies in `/data/media/comics-test`) is disposable. Production comic files are never written, renamed or converted without the owner's explicit OK.
