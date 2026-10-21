@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from .library_jobs import ORGANIZE, RETAG, SCAN, make_organize_handler, make_ret
 from .manual_import import MANUAL_IMPORT, make_manual_import_handler
 from .metron import MetronAuthError, MetronClient, MetronError, RateLimiter
 from .models import Event, Issue, Series, User
+from .perms import folder_problems
 from .refresh import REFRESH, make_refresh_handler
 from .scheduler import ensure_refresh_time, run_download_monitor, run_scheduler
 from .shelfmark import ShelfmarkClient, ShelfmarkError
@@ -40,6 +42,7 @@ from .web.monitor_routes import register_monitor_routes
 from .web.search_routes import register_search_routes
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
+log = logging.getLogger("fumora")
 PUBLIC_PATHS = ("/static/", "/login", "/setup", "/api/health")
 
 
@@ -93,6 +96,8 @@ def create_app(config: Config | None = None) -> FastAPI:
         with SessionLocal() as db:
             ensure_refresh_time(db)
             ensure_refresh_time(db, key="schedule.cv_refresh_time")
+            for problem in folder_problems(db, config.config_dir):
+                log.warning(problem)
         jobs.resume_all()
         tasks = []
         if config.scheduler:
@@ -220,10 +225,11 @@ def create_app(config: Config | None = None) -> FastAPI:
         }
         events = db.scalars(select(Event).order_by(Event.ts.desc()).limit(20)).all()
         metron_ready = settings_store.metron_ready(db)
+        problems = folder_problems(db, config.config_dir)
         return templates.TemplateResponse(
             request,
             "dashboard.html",
-            {"stats": stats, "events": events, "metron_ready": metron_ready},
+            {"stats": stats, "events": events, "metron_ready": metron_ready, "problems": problems},
         )
 
     def settings_context(db: Session, saved: list[str] | None = None) -> dict:

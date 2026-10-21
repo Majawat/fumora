@@ -1,8 +1,14 @@
-import pytest
-from fastapi.testclient import TestClient
+import os
 
-from fumora.config import Config
-from fumora.main import create_app
+# Unraid's umask, set before fumora is imported (perms.UMASK is read at import):
+# the permission tests then check 664/775, not whatever the shell happens to use.
+os.umask(0o002)
+
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+from fumora.config import Config  # noqa: E402
+from fumora.main import create_app  # noqa: E402
 
 
 @pytest.fixture

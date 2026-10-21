@@ -35,6 +35,7 @@ from .importer import log
 from .library_jobs import naming_settings
 from .models import Blocklist, File, Grab, Issue, Series
 from .numbers import normalize_number
+from .perms import normalize
 from .scanner import COMIC_EXTS, parse_issue_number
 from .search import Candidate
 from .shelfmark import ShelfmarkClient
@@ -275,6 +276,10 @@ def place_issue_file(
             src.unlink(missing_ok=True)  # the source's own copy, now converted
     else:
         placed = _place(src, dest, "torrent" if keep_original else "usenet")
+    if not (keep_original and placed != src and not convert.needs_conversion(src)):
+        # Moved in or newly converted: Fumora's own permissions, not the other
+        # program's. A hardlink is the torrent client's seeding file: left alone.
+        normalize(placed)
     if known is not None and (placed == src or not keep_original):
         known.path, known.size = str(placed), placed.stat().st_size
         row = known

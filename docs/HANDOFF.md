@@ -155,6 +155,21 @@ Design: the doc's "Other metadata sources", "Moving a series to Metron", "Manga"
   ComicVine key from Mylar's config; Mieruko-chan (id 15) is source cv.
   Helper: `/mnt/user/appdata/fumora-test/m5b_run.py cv|metron`.
 
+## Permissions (checked 2026-10-20)
+
+- Both containers run the app as 99:100 with umask 0002 (`/proc/1/status`).
+- Everything Fumora places, moves in, unpacks or converts is set to 664/775 (`perms.py`); hardlinked
+  torrent files keep the client's mode (same inode). Before this, moved-in files kept the source
+  program's mode: Shelfmark writes 644 (it has no UMASK set).
+- Folder problems (missing/read-only library or recycle folder, running as root) show on the dashboard
+  and in the startup log. Production currently shows "read-only library" by design (`/data:ro`).
+- `tests/container/smoke.sh` (CI `container-smoke`) runs the real image as Unraid does.
+- Open: on Hathor the running fumora-test container's `fumora.db` goes back to 644 a few seconds after
+  Fumora sets 664 (not reproducible in a fresh container on the same mounts, nor in CI). Harmless:
+  only Fumora writes it and it is nobody:users. Not worth more time unless it starts to matter.
+- Ad-hoc scripts: `docker exec -u 99:100 <c> sh -c 'umask 0002; ...'` (plain `docker exec` uses
+  umask 0022 and root, which is how earlier 644/755 test files appeared).
+
 ## Version numbers
 
 `pyproject.toml` and `fumora/__init__.py` (a test keeps them equal). The minor
