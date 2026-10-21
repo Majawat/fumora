@@ -130,14 +130,24 @@ def plan_series(
     colon: str = "delete",
     apostrophes: str = "remove",
     shared_folder: bool = False,
+    library_root: str | None = None,
 ) -> OrganizePlan:
     """What would change for one series. The folder is only renamed when no
     other series lives in it (a series and its annuals share one)."""
     skipped: list[str] = []
     if not series.path:
         return OrganizePlan(None, [], ["Series has no folder"])
-    parent = os.path.dirname(series.path.rstrip("/"))
-    target_folder = os.path.join(parent, render_path(folder_template, context(series), colon, apostrophes))
+    rendered = render_path(folder_template, context(series), colon, apostrophes)
+    # The template is relative to the library root: "{Publisher}/{Series Title}" must
+    # never be joined to the series' own parent, or each Organize nests it deeper.
+    # A series kept outside the library stays next to where it is.
+    current = series.path.rstrip("/")
+    root = (library_root or "").rstrip("/")
+    if root and current.startswith(root + "/"):
+        parent = root
+    else:
+        parent = os.path.dirname(current)
+    target_folder = os.path.join(parent, rendered)
     folder = None
     if target_folder != series.path and not shared_folder:
         folder = Rename(None, None, series.path, target_folder)

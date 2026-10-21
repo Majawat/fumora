@@ -2,11 +2,12 @@
 
 import asyncio
 import contextlib
+import os
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
 from . import naming, settings_store
@@ -23,6 +24,13 @@ SCAN, RETAG, ORGANIZE = "scan", "retag", "organize"
 
 def _series_ids(ctx: JobContext) -> list[int]:
     return list(ctx.params().get("series_ids") or [])
+
+
+def _hardlinked(path: str) -> bool:
+    try:
+        return os.stat(path).st_nlink > 1
+    except OSError:
+        return False
 
 
 @contextlib.asynccontextmanager
@@ -68,20 +76,33 @@ def make_retag_handler(
             if ids:
                 q = q.where(Series.id.in_(ids))
             if not ids or not dry_run:
-                # Library-wide runs and writes skip unconfirmed matches entirely
-                # (no Metron requests spent on files that can't be written).
-                q = q.where(or_(Series.match_status != "matched", Series.confirmed_by.is_not(None)))
+                # Library-wide runs and writes skip series that can't be written (the
+                # same rule as Series.writable): no Metron requests spent on them.
+                q = q.where(
+                    or_(Series.match_status != "matched", Series.confirmed_by.is_not(None)),
+                    Series.match_status.not_in(("review", "accepted", "pending")),
+                )
             issue_ids = db.scalars(q).all()
-        if not settings_store.metron_usable(user, password, token):
+            # Metron is only needed for issues whose record isn't cached yet
+            # (a ComicVine series is tagged from ComicVine).
+            need_metron = db.scalar(
+                select(func.count())
+                .select_from(Issue)
+                .where(Issue.id.in_(issue_ids), Issue.metron_id.is_not(None), Issue.metron_detail.is_(None))
+            )
+            tag_linked = (settings_store.get(db, "import.tag_torrents") or "off") == "on"
+        metron_ok = settings_store.metron_usable(user, password, token)
+        if need_metron and not metron_ok:
             raise RuntimeError("No Metron API token (or username and password) is set")
         done = params.get("done_issue_ids") or []
         done_set = set(done)
         todo = [i for i in issue_ids if i not in done_set]
         ctx.update(phase="preview" if dry_run else "write", progress=len(done), total=len(issue_ids))
-        counts = {"changed": 0, "unchanged": 0, "errors": 0}
+        counts = {"changed": 0, "unchanged": 0, "errors": 0, "hardlinked": 0}
         # Series Metron doesn't have get ComicVine's issue record instead.
         cv = make_cv_client(cv_key) if cv_key and make_cv_client is not None else None
-        async with _open(make_client, user, password, token) as client, _maybe(cv):
+        metron = _open(make_client, user, password, token) if metron_ok else None
+        async with _maybe(metron) as client, _maybe(cv):
             for n, issue_id in enumerate(todo, len(done) + 1):
                 with sf() as db:
                     issue = db.scalar(
@@ -132,6 +153,11 @@ def make_retag_handler(
                                 level="error",
                             )
                     for f in issue.files:
+                        if not tag_linked and _hardlinked(f.path):
+                            # A torrent's seeding file: rewriting it would break the hardlink
+                            # (and double the disk space). Same rule as torrent imports.
+                            counts["hardlinked"] += 1
+                            continue
                         # File I/O off the event loop: archives can be large.
                         result = await asyncio.to_thread(tag_file, issue, f, dry_run, recycle)
                         if result["error"]:
@@ -148,6 +174,11 @@ def make_retag_handler(
         summary = (
             f"{'Preview' if dry_run else 'Tagging'}: {counts['changed']} files {verb}, "
             f"{counts['unchanged']} already up to date, {counts['errors']} could not be tagged"
+            + (
+                f", {counts['hardlinked']} left alone (hardlinked: a torrent is seeding them)"
+                if counts["hardlinked"]
+                else ""
+            )
         )
         with sf() as db:
             log(db, summary, kind="retag")
@@ -164,6 +195,7 @@ def naming_settings(db) -> dict:
         "collected_template": settings_store.get(db, "naming.collected_template") or None,
         "colon": settings_store.get(db, "naming.colon") or "delete",
         "apostrophes": settings_store.get(db, "naming.apostrophes") or "remove",
+        "library_root": settings_store.get(db, "library.path"),
     }
 
 

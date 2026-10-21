@@ -171,10 +171,10 @@ async def ensure_cv_detail(db: Session, cv: ComicVineClient, issue: Issue) -> No
     if issue.metron_id is not None or issue.cv_id is None or issue.cv_detail is not None:
         return
     record = await cv.issue(issue.cv_id)
-    if record:
-        issue.cv_detail = record
-        issue.detail_fetched = datetime.now(UTC)
-        db.flush()
+    # {} = asked, ComicVine has nothing: not asked again until a refresh changes it.
+    issue.cv_detail = record or {}
+    issue.detail_fetched = datetime.now(UTC)
+    db.flush()
 
 
 def check_writable(series: Series, file: File) -> None:

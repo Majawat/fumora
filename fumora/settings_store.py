@@ -36,6 +36,13 @@ SETTINGS: list[SettingDef] = [
     SettingDef("metron.username", "Username", "Metron", help="Only needed without an API token."),
     SettingDef("metron.password", "Password", "Metron", secret=True),
     SettingDef(
+        "metron.requests_per_minute",
+        "Requests per minute",
+        "Metron",
+        default="20",
+        help="At most 20 (Metron's limit). Lower it if Metron asks you to slow down.",
+    ),
+    SettingDef(
         "comicvine.api_key",
         "API key",
         "ComicVine",
@@ -92,6 +99,13 @@ SETTINGS += [
         "Collected editions file (optional)",
         "Naming",
         help="Used for TPB, hardcover, omnibus and graphic novel series instead of the issue template.",
+    ),
+    SettingDef(
+        "naming.apostrophes",
+        "Apostrophes",
+        "Naming",
+        default="remove",
+        choices=(("remove", "removed (Mylar)"), ("keep", "kept")),
     ),
     SettingDef(
         "naming.colon",

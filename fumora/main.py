@@ -174,7 +174,9 @@ def create_app(config: Config | None = None) -> FastAPI:
         if db.scalar(select(func.count()).select_from(User)):
             return RedirectResponse("/login", status_code=303)
         error = None
-        if len(password) < 8:
+        if not username.strip():
+            error = "Enter a username."
+        elif len(password) < 8:
             error = "Password must be at least 8 characters."
         elif password != password2:
             error = "Passwords do not match."

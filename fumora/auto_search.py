@@ -112,13 +112,13 @@ def make_search_handler():
                         if best is None:
                             missing += 1
                             continue
-                        if waiting is not None:  # a release held for an OK
-                            if best.holdable:
-                                continue  # still nothing better: it keeps waiting
-                            waiting.state = "removed"
-                            waiting.message = f"Superseded by '{best.parsed.title}'"
+                        if waiting is not None and best.holdable:
+                            continue  # a release held for an OK, and still nothing better
                         try:
                             await grab(db, best, issue, approval=best.holdable)
+                            if waiting is not None:  # only once the better one was sent
+                                waiting.state = "removed"
+                                waiting.message = f"Superseded by '{best.parsed.title}'"
                             taken.add(best.release.get("guid") or best.parsed.title)
                             if best.holdable:
                                 held += 1

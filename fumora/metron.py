@@ -282,11 +282,5 @@ class MetronClient:
     async def issue(self, metron_id: int) -> dict:
         return await self._get(f"issue/{metron_id}/")
 
-    def series_modified_since(self, since_iso: str) -> AsyncIterator[dict]:
-        return self._paged("series/", {"modified_gt": since_iso})
-
-    def issues_modified_since(self, since_iso: str) -> AsyncIterator[dict]:
-        return self._paged("issue/", {"modified_gt": since_iso})
-
     def releases_between(self, start: str, end: str) -> AsyncIterator[dict]:
         return self._paged("issue/", {"store_date_range_after": start, "store_date_range_before": end})

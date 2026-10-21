@@ -357,8 +357,10 @@ def unmatch_series(db: Session, series: Series, note: str) -> None:
             db.delete(issue)
         else:
             clear_metron_values(issue)
-    if series.mylar_name:
+    locked = set(series.locked_fields or [])
+    if series.mylar_name and "name" not in locked:
         series.name = series.mylar_name
+    if series.mylar_name and series.mylar_year and "year_began" not in locked:
         series.year_began = series.mylar_year
     series.metron_id = None
     series.source = "cv"
