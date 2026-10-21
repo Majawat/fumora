@@ -328,12 +328,16 @@ def _wants_records(db: Session, g: Grab) -> list[int]:
     return list(dict.fromkeys(g.issue_ids or [g.issue_id])) if series is not None and series.writable else []
 
 
-def _file_number(f: Path, series: Series) -> str | None:
-    """The issue number a downloaded file's name gives, if it clearly names this series.
-    "Vol. 12" counts where the series' issues are volumes (manga, collected editions)."""
+def _file_number(f: Path, series: Series, confident: bool = False) -> str | None:
+    """The issue number a downloaded file's name gives. "Vol. 12" counts where the
+    series' issues are volumes (manga, collected editions). confident=True: only when
+    the name clearly is this series (used to refuse a mislabelled single file);
+    otherwise the first number in the name, as for matching files in a pack."""
     rel = parse_release(f.name)
     names = {series_key(n) for n in (series.name, series.mylar_name) if n}
     if rel.number is None or (rel.series and series_key(rel.series) not in names):
+        if confident:
+            return None
         num = parse_issue_number(f.name, series.name) or parse_issue_number(f.name, series.mylar_name)
         return normalize_number(num) if num else None
     if rel.kind == "issue":
@@ -372,7 +376,7 @@ def import_grab(db: Session, g: Grab, path: str) -> str:
     for f in files:
         if len(files) == 1 and len(issues) == 1:
             issue = next(iter(issues.values()))
-            said = _file_number(f, series)
+            said = _file_number(f, series, confident=True)
             if said is not None and said != normalize_number(issue.number):
                 # The file says it's another issue: never import it under this one's name.
                 skipped.append(f"{f.name}: the file is #{said}, not #{issue.number}")

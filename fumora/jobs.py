@@ -40,7 +40,13 @@ class JobContext:
         fut = asyncio.ensure_future(asyncio.to_thread(fn, *args))
         self._threads.add(fut)
         fut.add_done_callback(self._threads.discard)
-        return await asyncio.shield(fut)
+        try:
+            return await asyncio.shield(fut)
+        except asyncio.CancelledError:
+            # Let it finish before the handler unwinds: it may be using the handler's
+            # database session (a rename and the paths recorded for it).
+            await asyncio.gather(fut, return_exceptions=True)
+            raise
 
     async def settle(self) -> None:
         if self._threads:

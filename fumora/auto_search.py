@@ -127,6 +127,10 @@ def make_search_handler():
                         if best is None:
                             missing += 1
                             continue
+                        if waiting is not None:
+                            db.refresh(waiting)
+                            if waiting.state != APPROVAL:
+                                continue  # approved (or removed) by the owner meanwhile
                         if waiting is not None and best.holdable:
                             continue  # a release held for an OK, and still nothing better
                         if db.scalar(select(File.id).where(File.issue_id == issue.id).limit(1)):

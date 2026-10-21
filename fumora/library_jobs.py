@@ -83,12 +83,13 @@ def make_retag_handler(
                     Series.match_status.not_in(("review", "accepted", "pending")),
                 )
             issue_ids = db.scalars(q).all()
-            # Metron is only needed for issues whose record isn't cached yet
-            # (a ComicVine series is tagged from ComicVine).
+            # Metron is only needed for issues whose record isn't cached yet (a ComicVine
+            # series is tagged from ComicVine). Counted with the same query, not an IN
+            # list of every id: SQLite caps the variables in one statement.
             need_metron = db.scalar(
-                select(func.count())
-                .select_from(Issue)
-                .where(Issue.id.in_(issue_ids), Issue.metron_id.is_not(None), Issue.metron_detail.is_(None))
+                select(func.count()).select_from(
+                    q.where(Issue.metron_id.is_not(None), Issue.metron_detail.is_(None)).subquery()
+                )
             )
             tag_linked = (settings_store.get(db, "import.tag_torrents") or "off") == "on"
         metron_ok = settings_store.metron_usable(user, password, token)

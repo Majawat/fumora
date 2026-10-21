@@ -482,8 +482,8 @@ async def test_41_a_second_job_of_a_kind_is_refused_not_dropped(app, logged_in):
     await runner.shutdown()
 
     app.state.jobs.start = lambda kind, params=None: (_ for _ in ()).throw(JobBusy(kind, 7))
-    # Accepting suggestions while an import runs used to be folded into it and lost.
-    r = logged_in.post("/import/accept-suggestions", follow_redirects=False)
+    # A route that does start a job while one runs gets the 409 page, not a silent no-op.
+    r = logged_in.post("/library/scan", follow_redirects=False)
     assert r.status_code == 409 and "already running" in r.text
 
 
@@ -568,3 +568,115 @@ def test_59_organize_moves_the_files_recorded_in_a_renamed_folder(app, tmp_path)
             tmp_path / "Umbrella Academy Dallas (2008)" / "Umbrella Academy Dallas 001 (2008).cbz"
         )
         assert os.path.exists(moved) and s.path == str(tmp_path / "Umbrella Academy Dallas (2008)")
+
+
+# --- review of PR #30 --------------------------------------------------------------------
+
+
+def test_pr30_1_a_file_of_another_series_is_not_trusted_for_its_number(app, tmp_path):
+    from fumora.grabbing import _file_number
+
+    _setup(app, tmp_path, numbers=("16",))
+    with app.state.session_factory() as db:
+        s = db.scalar(select(Series))
+        assert _file_number(Path("Action Comics 017 (2026).cbz"), s, confident=True) is None
+        assert _file_number(Path("Absolute Batman 017 (2026).cbz"), s, confident=True) == "17"
+
+
+async def test_pr30_2_a_cancelled_jobs_file_work_ends_before_its_session(app):
+    import asyncio
+    import threading
+
+    from fumora.jobs import JobRunner
+
+    runner = JobRunner(app.state.session_factory)
+    release, order = threading.Event(), []
+
+    def rename():
+        release.wait(5)
+        order.append("thread done")
+
+    async def job(ctx):
+        try:
+            await ctx.thread(rename)
+        finally:
+            order.append("session closed")
+
+    runner.register("organize", job)
+    job_id = runner.start("organize")
+    await asyncio.sleep(0.05)
+    runner.cancel(job_id)
+    await asyncio.sleep(0.05)
+    release.set()
+    for _ in range(100):
+        if runner.active("organize") is None:
+            break
+        await asyncio.sleep(0.02)
+    assert order == ["thread done", "session closed"]
+
+
+async def test_pr30_3_library_wide_retag_handles_a_big_library(app, tmp_path):
+    """Every issue needs Metron and no login is saved: the job stops right after counting
+    them. That count used an IN list of every id, which SQLite refuses past its limit."""
+    from sqlalchemy import insert
+
+    with app.state.session_factory() as db:
+        s = Series(name="Big", match_status="not_found", locked_fields=[])
+        db.add(s)
+        db.flush()
+        n = 33_000  # more than SQLite's limit of variables in one statement
+        rows = [{"series_id": s.id, "number": str(i), "metron_id": i + 1, "locked_fields": [],
+                 "status": "Skipped", "monitored": False} for i in range(n)]  # fmt: skip
+        db.execute(insert(Issue), rows)
+        ids = db.scalars(select(Issue.id)).all()
+        db.execute(insert(File), [{"issue_id": i, "path": f"/nowhere/{i}.cbz"} for i in ids])
+        db.commit()
+    with pytest.raises(RuntimeError, match="No Metron API token"):
+        await make_retag_handler(app.state.make_metron_client)(_job(app, RETAG, {"dry_run": True}))
+
+
+def test_pr30_4_try_another_during_a_search_keeps_the_button(app, tmp_path, logged_in):
+    _setup(app, tmp_path, numbers=("16",))
+    app.state.jobs.active = lambda kind: object()  # a search is running
+    with app.state.session_factory() as db:
+        gid = _grab_row(db, [_abs(db, "16").id], state="import_failed").id
+    logged_in.post(f"/queue/{gid}/retry")
+    with app.state.session_factory() as db:
+        assert db.get(Grab, gid).state == "import_failed"  # still offered; nothing searched yet
+
+
+@respx.mock
+async def test_pr30_5_a_release_approved_during_the_search_is_not_superseded(app, tmp_path):
+    _setup(app, tmp_path, numbers=("16",))
+    sf = app.state.session_factory
+    search = respx.get("http://prowlarr.test/api/v1/search")
+    search.respond(200, json=[_release("Absolute Batman 016 (2026) FRENCH")])
+    sab = respx.get(f"{SAB}/api", params={"mode": "addurl"}).respond(
+        200, json={"status": True, "nzo_ids": ["n"]}
+    )
+    await make_search_handler()(_job(app, "search", {}))  # the French one is held for an OK
+
+    def approved_meanwhile(request):
+        if "016" not in request.url.params.get("query", ""):  # the series search: still French only
+            return httpx.Response(200, json=[_release("Absolute Batman 016 (2026) FRENCH")])
+        with sf() as db:  # the issue-specific follow-up search, after the held one was looked up
+            held = db.scalar(select(Grab).where(Grab.state == APPROVAL))
+            if held is not None:
+                held.state = "downloading"  # the owner clicked OK on the Queue page
+                db.commit()
+        return httpx.Response(200, json=[_release("Absolute Batman 016 (2026) (Digital)")])
+
+    search.mock(side_effect=approved_meanwhile)
+    sab.reset()
+    await make_search_handler()(_job(app, "search", {}))
+    with sf() as db:
+        assert [g.state for g in db.scalars(select(Grab))] == ["downloading"]
+    assert not sab.called
+
+
+def test_pr30_6_accepting_suggestions_during_an_import_is_fine(app, logged_in):
+    started = []
+    app.state.jobs.active = lambda kind: object()  # an import is running: it applies them itself
+    app.state.jobs.start = lambda kind, params=None: started.append(kind)
+    r = logged_in.post("/import/accept-suggestions", follow_redirects=False)
+    assert r.status_code == 303 and started == []

@@ -182,8 +182,8 @@ def register_search_routes(app: FastAPI, templates: Jinja2Templates, get_db) -> 
         if g.state in ("queued", "downloading", "importing"):
             _stop_direct(db, g)
             g.state = "removed"
-        elif g.state == "import_failed":
-            g.state = "removed"  # dealt with: the scheduled search may take the issue again
+        elif g.state == "import_failed" and app.state.jobs.active(SEARCH) is None:
+            g.state = "removed"  # dealt with: its search starts below
         searching = app.state.jobs.active(SEARCH) is None and g.issue_id is not None
         log(
             db,

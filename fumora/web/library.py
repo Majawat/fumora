@@ -320,7 +320,8 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
             return RedirectResponse(f"/series/{series_id}", status_code=303)
         series.match_status = "accepted"
         db.commit()
-        app.state.jobs.start(MYLAR_IMPORT, {"skip_read": True})
+        if app.state.jobs.active(MYLAR_IMPORT) is None:  # a running import applies it itself
+            app.state.jobs.start(MYLAR_IMPORT, {"skip_read": True})
         return RedirectResponse(f"/series/{series_id}", status_code=303)
 
     @app.post("/import/accept-suggestions")
@@ -330,7 +331,8 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
         ):
             series.match_status = "accepted"
         db.commit()
-        app.state.jobs.start(MYLAR_IMPORT, {"skip_read": True})
+        if app.state.jobs.active(MYLAR_IMPORT) is None:  # a running import applies it itself
+            app.state.jobs.start(MYLAR_IMPORT, {"skip_read": True})
         return RedirectResponse("/import", status_code=303)
 
     @app.get("/import", response_class=HTMLResponse)
