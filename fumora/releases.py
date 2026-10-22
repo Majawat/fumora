@@ -96,11 +96,9 @@ def series_key(name: str | None) -> str:
 
 def _scene_to_spaces(title: str) -> str:
     """'DC.Comics-Absolute.Batman.No.02.2024.HYBRID.COMIC' -> spaced words."""
-    words = title.split()
-    scene = max(words, key=len) if words else ""
-    # Scene style if the longest word is dotted/underscored ("A.B.No.02.2024 [Digital]"
-    # still counts); "Mr. Miracle 001" or "Vol. 2" never does.
-    if scene.count(".") < 2 and scene.count("_") < 2:
+    # Scene style if any word is dotted/underscored ("X-Men.001.2024 [Digital-Empire]"
+    # counts, whatever the tags around it); "Mr. Miracle 001" or "Vol. 2" never does.
+    if not any(w.count(".") >= 2 or w.count("_") >= 2 for w in title.split()):
         return title
     out = re.sub(r"(?<=No)\.(?=\d)", " ", title)  # No.02 -> No 02
     out = re.sub(r"(\d)\.(?=(?:19|20)\d{2}(?!\d))", r"\1 ", out)  # 009.2025 -> 009 2025 (issue, year)

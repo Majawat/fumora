@@ -354,6 +354,9 @@ def test_25_30_release_names(app):
     r = parse_release("DC.Comics-Absolute.Batman.No.02.2024.HYBRID.COMIC [Digital]")
     assert (r.series, r.number) == ("Absolute Batman", "2")  # de-dotted, publisher prefix dropped
     assert parse_release("Mr. Miracle 001 (2017)").series == "Mr. Miracle"
+    r = parse_release("X-Men.001.2024 [Digital-Empire]")  # a tag longer than the dotted name
+    assert (r.series, r.number, r.year) == ("X-Men", "1", 2024)
+    assert parse_release("Captain America U.S.A. 001 (2024)").number == "1"
     r = parse_release("Batman Vol. 3 016 (2016) (Digital)")
     assert (r.series, r.number, r.volume) == ("Batman", "16", "3")
 
