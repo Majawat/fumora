@@ -680,3 +680,29 @@ def test_pr30_6_accepting_suggestions_during_an_import_is_fine(app, logged_in):
     app.state.jobs.start = lambda kind, params=None: started.append(kind)
     r = logged_in.post("/import/accept-suggestions", follow_redirects=False)
     assert r.status_code == 303 and started == []
+
+
+def test_settings_only_save_offered_choices(app):
+    with app.state.session_factory() as db:
+        assert settings_store.apply_form(db, {"metron.requests_per_minute": "50"}) == []
+        assert settings_store.get(db, "metron.requests_per_minute") == "20"
+        assert settings_store.apply_form(db, {"metron.requests_per_minute": "10"}) == [
+            "metron.requests_per_minute"
+        ]
+        assert settings_store.get(db, "metron.requests_per_minute") == "10"
+
+
+def test_organize_twice_outside_the_library_stays_put(app, tmp_path):
+    """A series kept outside the library folder: a second Organize must not nest it again."""
+    from tests.test_scanner_naming import _series
+
+    tpl = "{Publisher}/{Series Title} ({Series Year})"
+    old = tmp_path / "elsewhere" / "Dallas"
+    old.mkdir(parents=True)
+    with app.state.session_factory() as db:
+        s = _series(db, old)
+        plan = naming.plan_series(s, folder_template=tpl, library_root=str(tmp_path / "library"))
+        assert naming.apply_plan(db, s, plan)[0] == 1
+        assert s.path == str(tmp_path / "elsewhere" / "Dark Horse" / "Umbrella Academy Dallas (2008)")
+        again = naming.plan_series(s, folder_template=tpl, library_root=str(tmp_path / "library"))
+        assert again.folder is None

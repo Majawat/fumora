@@ -145,6 +145,8 @@ def plan_series(
     root = (library_root or "").rstrip("/")
     if root and current.startswith(root + "/"):
         parent = root
+    elif current.endswith("/" + rendered.strip("/")):
+        parent = current[: -len(rendered.strip("/")) - 1]  # outside the library, already in place
     else:
         parent = os.path.dirname(current)
     target_folder = os.path.join(parent, rendered)
