@@ -31,7 +31,7 @@ Jinja2 + htmx. Image: `ghcr.io/majawat/fumora:edge` (built from `main`).
 | M5a GetComics + Anna's Archive (via Shelfmark) | merged 2026-10-20 | #27 |
 | M5b other sources: ComicVine refresh, move to Metron, add from ComicVine, reading direction, Metron gaps page | merged 2026-10-20 | #28 |
 | M5c: full tags at import (#24: Metron or ComicVine issue record first), Import files page (manual import), permissions, version 0.5.0 | merged 2026-10-21, tagged v0.5.0 | #29 |
-| 0.5.1: fixes from the full Gemini audit of v0.5.0 (41 real findings) | PR open, branch `audit-fixes` | — |
+| 0.5.1: fixes from the full Gemini audit of v0.5.0 (41 real findings) + verification pass | merged 2026-10-22, tagged v0.5.1 | #30 |
 | M5 rest: TPB fallback (TPB = own series; grab only when single issues aren't available), GCD ratings via the GCD API (needs the owner's GCD account), manual series, split/join, notifications (back burner) | not started | — |
 | M6 side-by-side week with Mylar, cut over | not started | — |
 
