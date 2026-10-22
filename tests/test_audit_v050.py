@@ -356,7 +356,12 @@ def test_25_30_release_names(app):
     assert parse_release("Mr. Miracle 001 (2017)").series == "Mr. Miracle"
     r = parse_release("X-Men.001.2024 [Digital-Empire]")  # a tag longer than the dotted name
     assert (r.series, r.number, r.year) == ("X-Men", "1", 2024)
-    assert parse_release("Captain America U.S.A. 001 (2024)").number == "1"
+    # Abbreviations keep their dots (a trailing "." is trimmed, as it always was on main).
+    for title, series in (("Captain America U.S.A. 001 (2024)", "Captain America U.S.A"),
+                          ("G.I. Joe - A Real American Hero 001 (2024)", "G.I. Joe - A Real American Hero"),
+                          ("B.P.R.D. 001 (2002)", "B.P.R.D")):  # fmt: skip
+        r = parse_release(title)
+        assert (r.series, r.number) == (series, "1"), title
     r = parse_release("Batman Vol. 3 016 (2016) (Digital)")
     assert (r.series, r.number, r.volume) == ("Batman", "16", "3")
 
@@ -709,3 +714,21 @@ def test_organize_twice_outside_the_library_stays_put(app, tmp_path):
         assert s.path == str(tmp_path / "elsewhere" / "Dark Horse" / "Umbrella Academy Dallas (2008)")
         again = naming.plan_series(s, folder_template=tpl, library_root=str(tmp_path / "library"))
         assert again.folder is None
+
+
+def test_organize_outside_the_library_under_a_matching_publisher_folder(app, tmp_path):
+    from tests.test_scanner_naming import _series
+
+    tpl = "{Publisher}/{Series Title} ({Series Year})"
+    with app.state.session_factory() as db:
+        s = _series(db, tmp_path / "outside" / "Dark Horse" / "Dallas")
+        plan = naming.plan_series(s, folder_template=tpl, library_root=str(tmp_path / "library"))
+        assert plan.folder.new == str(tmp_path / "outside" / "Dark Horse" / "Umbrella Academy Dallas (2008)")
+
+
+def test_organize_a_series_at_the_filesystem_root(app):
+    with app.state.session_factory() as db:
+        from tests.test_scanner_naming import _series
+
+        s = _series(db, Path("/Umbrella Academy Dallas (2008)"))
+        assert naming.plan_series(s).folder is None

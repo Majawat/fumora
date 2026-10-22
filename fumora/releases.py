@@ -96,9 +96,14 @@ def series_key(name: str | None) -> str:
 
 def _scene_to_spaces(title: str) -> str:
     """'DC.Comics-Absolute.Batman.No.02.2024.HYBRID.COMIC' -> spaced words."""
-    # Scene style if any word is dotted/underscored ("X-Men.001.2024 [Digital-Empire]"
-    # counts, whatever the tags around it); "Mr. Miracle 001" or "Vol. 2" never does.
-    if not any(w.count(".") >= 2 or w.count("_") >= 2 for w in title.split()):
+
+    # Scene style if a word is dotted and carries a number ("X-Men.001.2024 [Digital-Empire]",
+    # whatever the tags around it) or is underscored. Abbreviations ("U.S.A.", "G.I. Joe",
+    # "B.P.R.D. 001") and "Mr. Miracle" or "Vol. 2" keep their dots.
+    def scene(w: str) -> bool:
+        return (w.count(".") >= 2 and any(ch.isdigit() for ch in w)) or w.count("_") >= 2
+
+    if not any(scene(w) for w in title.split()):
         return title
     out = re.sub(r"(?<=No)\.(?=\d)", " ", title)  # No.02 -> No 02
     out = re.sub(r"(\d)\.(?=(?:19|20)\d{2}(?!\d))", r"\1 ", out)  # 009.2025 -> 009 2025 (issue, year)

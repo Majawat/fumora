@@ -145,10 +145,17 @@ def plan_series(
     root = (library_root or "").rstrip("/")
     if root and current.startswith(root + "/"):
         parent = root
-    elif current.endswith("/" + rendered.strip("/")):
-        parent = current[: -len(rendered.strip("/")) - 1]  # outside the library, already in place
     else:
+        # Outside the library: stay where it is. If the folders above it already are the
+        # template's leading folders ("Dark Horse/" for "{Publisher}/..."), step above them.
         parent = os.path.dirname(current)
+        lead = [p for p in rendered.strip("/").split("/") if p][:-1]
+        above, up = [], parent
+        for _ in lead:
+            above.insert(0, os.path.basename(up))
+            up = os.path.dirname(up)
+        if lead and above == lead:
+            parent = up
     target_folder = os.path.join(parent, rendered)
     folder = None
     if target_folder != series.path and not shared_folder:
