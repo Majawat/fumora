@@ -10,6 +10,7 @@ from fumora import settings_store
 from fumora.auto_search import make_search_handler
 from fumora.grabbing import APPROVAL, active_grab
 from fumora.models import Blocklist, Grab, Issue, Series
+from fumora.releases import matches_issue, parse_release
 from fumora.search import Profile, evaluate, language_code, load_profile, rank
 from fumora.shelfmark import clean_libgen_title, to_release
 from tests.test_ddl_sources import SM, _gc_settings
@@ -361,3 +362,36 @@ def test_numbering_can_be_set_by_hand(app, logged_in):
 def test_libgen_folder_paths_are_dropped():
     raw = r"Yen.Press.-.Mieruko.Chan.Vol.12.2026.Retail.Comic.eBook-BitBook s:\scene\2026-04\Yen"
     assert clean_libgen_title(raw) == "Yen.Press.-.Mieruko.Chan.Vol.12.2026.Retail.Comic.eBook-BitBook"
+
+
+# --- #7: what the live Shelfmark test (2026-10-22) found ------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw", "series", "number"),
+    [
+        ("Walking Dead (The) 1 #100 (Image) (2012) (Digital) (Zone-Empire).cbr", "Walking Dead", "100"),
+        ("Superman: Batman 1 #14 (2005) (Digital) (Zone-Empire).cbr", "Superman: Batman", "14"),
+        ("Black Hole #1 (1995).cbr", "Black Hole", "1"),
+    ],
+)
+def test_libgen_volume_before_the_issue_is_not_part_of_the_name(raw, series, number):
+    r = parse_release(clean_libgen_title(raw))
+    assert (r.series, r.kind, r.number) == (series, "issue", number)
+    assert matches_issue(
+        r, ["The Walking Dead", "Superman/Batman", "Superman: Batman", "Black Hole"], number, ()
+    )
+
+
+def test_a_cover_only_file_is_not_the_issue():
+    s = Series(name="The Walking Dead", year_began=2003, series_type="Single Issue")
+    issue = Issue(series=s, number="100")
+    title = "Walking Dead (The) v1 #100 (2012) (Cover B - Marc Silvestri Variant) (Cover ONLY) (ScanDog).cbr"
+    c = evaluate({"title": title, "size": 8 * 2**20, "protocol": "ddl"}, issue, Profile())
+    assert "only the cover" in c.rejections
+
+
+def test_language_from_a_bracket_tag_but_not_from_a_name():
+    assert parse_release("Walking Dead (The) v1 #100 (rus).cbz").language == "ru"
+    assert parse_release("Batman Poche #50 (1984) (Comics Fr).cbr").language == "fr"
+    assert parse_release("The Walking Dead v01-v32 by Tony Moore, Rus Wooton [ENG / CBR]").language == "en"

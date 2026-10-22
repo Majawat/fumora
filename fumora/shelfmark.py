@@ -44,6 +44,9 @@ def clean_libgen_title(title: str) -> str:
     confuse the release parser."""
     # Some rows end in the uploader's folder path: "... s:\\scene\\2026-04\\Yen.Press...".
     title = re.sub(r"\s+\S*\\\S.*$", "", title)
+    # Libgen's catalogue writes the volume before the issue: "Walking Dead (The) 1 #100" is
+    # volume 1, issue 100 of The Walking Dead, not a series called "Walking Dead 1".
+    title = re.sub(r"^(.*?\S)\s(\d{1,2})\s(?=#\s?[\d½.-])", r"\1 v\2 ", title)
     m = re.match(r"^(?P<meta>.*?)\s+c c \d+\s+(?P<file>.*)$", title)
     if not m:
         return title

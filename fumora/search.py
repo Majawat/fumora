@@ -6,6 +6,7 @@ before packs.
 """
 
 import math
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -184,6 +185,8 @@ def evaluate(release: dict, issue: Issue, profile: Profile) -> Candidate:
     if size > limit:
         c.rejections.append(f"too big ({size:.0f} MB > {limit:.0f})")
     title_l = (release.get("title") or "").lower()
+    if re.search(r"\bcovers?\s+only\b", title_l):  # Libgen: "(Cover B - ... Variant) (Cover ONLY)"
+        c.rejections.append("only the cover")
     if hit := next((w for w in profile.ignore_words if w.lower() in title_l), None):
         c.rejections.append(f"ignored word: {hit}")
     if profile.blocked_groups and _group_in(rel.group, title_l, profile.blocked_groups):

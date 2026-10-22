@@ -28,6 +28,13 @@ LANGUAGES = {
     "portuguese": "pt", "russian": "ru", "japanese": "ja", "korean": "ko", "chinese": "zh",
     "fre": "fr", "ger": "de", "spa": "es", "ita": "it", "jpn": "ja",
 }  # fmt: skip
+# Language codes only trusted as a whole bracket tag ("(rus)", "(Comics Fr)"): as bare words
+# they are also names ("Rus Wooton").
+TAG_LANGUAGES = {
+    "rus": "ru", "ru": "ru", "por": "pt", "pt": "pt", "pol": "pl", "pl": "pl", "dut": "nl", "nl": "nl",
+    "fra": "fr", "fr": "fr", "comics fr": "fr", "deu": "de", "de": "de", "es": "es", "it": "it",
+    "kor": "ko", "chi": "zh", "en": "en", "eng": "en",
+}  # fmt: skip
 SCENE_PUBLISHERS = (
     "dc comics", "marvel", "image comics", "image", "idw", "dark horse", "boom", "kodansha", "fantagraphics",
     "disney", "titan", "dynamite", "oni press", "viz", "yen press", "vertigo", "valiant",
@@ -151,6 +158,8 @@ def parse_release(title: str) -> ParsedRelease:
         if (yv := re.fullmatch(r"v((?:19|20)\d{2})", t)) and _plausible_year(yv.group(1)):
             r.volume = yv.group(1)  # Mylar's year volume: "(v2010)"
             r.year = r.year or int(yv.group(1))
+        if t.strip() in TAG_LANGUAGES:
+            r.language = TAG_LANGUAGES[t.strip()]
         if _GROUP.match(tag.strip()):
             r.group = tag.strip()
         if re.search(r"\b(\d+\s*covers?|variant|virgin|cover [a-z]|1:\d+)\b", t):
