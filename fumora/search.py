@@ -140,7 +140,12 @@ def evaluate(release: dict, issue: Issue, profile: Profile) -> Candidate:
     names = [n for n in (series.name, series.mylar_name) if n]
     collected = series.series_type in COLLECTED_TYPES
     as_volumes = not collected and series.issues_are_volumes  # manga: "Vol. 12" is issue 12
-    years = (series.year_began, issue.cover_date.year if issue.cover_date else None)
+    # New issues often have a store date but no cover date yet: use whichever is known.
+    years = (
+        series.year_began,
+        issue.cover_date.year if issue.cover_date else None,
+        issue.store_date.year if issue.store_date else None,
+    )
 
     one_volume = collected and len(series.issues) == 1 and normalize_number(issue.number) == "1"
     if one_volume and matches_single_volume(rel, names, years):

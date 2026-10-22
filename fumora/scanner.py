@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from .models import File, Series
 from .numbers import normalize_number
+from .releases import series_key
 
 COMIC_EXTS = {".cbz", ".cbr", ".cb7", ".cbt", ".pdf"}
 _BRACKETS = re.compile(r"\([^)]*\)|\[[^\]]*\]|\{[^}]*\}")
@@ -17,10 +18,8 @@ _NUMBER = re.compile(r"(?<![a-z0-9])#?(-?\d+(?:\.\d+)?|½)(?:[a-z]{1,3})?(?![a-z
 _VOLUME = re.compile(r"(?<![a-z0-9])v(?:ol(?:ume)?)?\.?\s*\d+", re.IGNORECASE)
 
 
-def _key(text: str) -> str:
-    text = text.lower().replace("&", "and")
-    text = re.sub(r"^the\s+", "", text)
-    return re.sub(r"[^a-z0-9]", "", text)
+# One way to compare series names everywhere (dots and underscores count as spaces).
+_key = series_key
 
 
 def strip_series_prefix(stem: str, series_name: str | None) -> str | None:

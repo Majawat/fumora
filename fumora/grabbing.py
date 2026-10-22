@@ -37,10 +37,11 @@ from .library_jobs import naming_settings
 from .models import Blocklist, File, Grab, Issue, Series
 from .numbers import normalize_number
 from .perms import normalize
+from .releases import parse_release, series_key
 from .scanner import COMIC_EXTS, parse_issue_number
 from .search import Candidate
 from .shelfmark import ShelfmarkClient
-from .tagging import tag_file
+from .tagging import DEFAULT_RECYCLE, tag_file
 
 logger = logging.getLogger("fumora.grabbing")
 ACTIVE = ("queued", "downloading", "importing")
@@ -211,6 +212,9 @@ def _place_converted(src: Path, dest: Path) -> Path:
     """Convert a CBR/CB7/CBT download into a new CBZ at `dest` (.cbz). The
     download is only read; it stays where it is until the CBZ is in place."""
     dest.parent.mkdir(parents=True, exist_ok=True)
+    if src.stat().st_dev != dest.parent.stat().st_dev:
+        # Same rule as every other import: no silent copy across mounts.
+        raise _same_mount_error(OSError(errno.EXDEV, "different mounts"))
     tmp = dest.parent / f".fumora-import-{uuid.uuid4().hex[:8]}{src.suffix.lower()}"
     try:
         shutil.copyfile(src, tmp)
@@ -278,21 +282,28 @@ def place_issue_file(
     if name_taken(dest, src):
         return None, f"{dest.with_suffix('.cbz').name} already exists"
     in_place = dest.exists() and dest.resolve() == src.resolve()
-    # The folder scan may know the file already (not linked to an issue).
-    known = db.scalar(select(File).where(File.path == str(src), File.issue_id.is_(None)))
     if in_place and not convert.needs_conversion(src):
         placed = src
+    elif in_place:
+        # Already in the library at its own name: converted where it is, and the
+        # original goes to the recycle folder (never deleted, never overwritten).
+        recycle = settings_store.get(db, "library.recycle_path") or DEFAULT_RECYCLE
+        placed = convert.convert_to_cbz(src, recycle)
     elif convert.needs_conversion(src):
         placed = _place_converted(src, dest)
         if not keep_original:
-            src.unlink(missing_ok=True)  # the source's own copy, now converted
+            src.unlink(missing_ok=True)  # the download's own copy, now converted
     else:
         placed = _place(src, dest, "torrent" if keep_original else "usenet")
     if not (keep_original and placed != src and not convert.needs_conversion(src)):
         # Moved in or newly converted: Fumora's own permissions, not the other
         # program's. A hardlink is the torrent client's seeding file: left alone.
         normalize(placed)
-    if known is not None and (placed == src or not keep_original):
+    # The folder scan may know the file already (unlinked), at its old or its new path.
+    known = db.scalar(
+        select(File).where(File.path.in_([str(src), str(placed)]), File.issue_id.is_(None)).limit(1)
+    )
+    if known is not None and (known.path == str(placed) or placed == src or not keep_original):
         known.path, known.size = str(placed), placed.stat().st_size
         row = known
     else:
@@ -317,6 +328,25 @@ def _wants_records(db: Session, g: Grab) -> list[int]:
     return list(dict.fromkeys(g.issue_ids or [g.issue_id])) if series is not None and series.writable else []
 
 
+def _file_number(f: Path, series: Series, confident: bool = False) -> str | None:
+    """The issue number a downloaded file's name gives. "Vol. 12" counts where the
+    series' issues are volumes (manga, collected editions). confident=True: only when
+    the name clearly is this series (used to refuse a mislabelled single file);
+    otherwise the first number in the name, as for matching files in a pack."""
+    rel = parse_release(f.name)
+    names = {series_key(n) for n in (series.name, series.mylar_name) if n}
+    if rel.number is None or (rel.series and series_key(rel.series) not in names):
+        if confident:
+            return None
+        num = parse_issue_number(f.name, series.name) or parse_issue_number(f.name, series.mylar_name)
+        return normalize_number(num) if num else None
+    if rel.kind == "issue":
+        return normalize_number(rel.number)
+    if rel.kind == "volume" and (series.issues_are_volumes or series.series_type in COLLECTED_TYPES):
+        return normalize_number(rel.number)
+    return None
+
+
 def import_grab(db: Session, g: Grab, path: str) -> str:
     """Import a finished download. Returns a one-line summary."""
     issues = {
@@ -332,6 +362,9 @@ def import_grab(db: Session, g: Grab, path: str) -> str:
     series = next(iter(issues.values())).series
     if not series.path:
         series.path = folder_for(db, series)
+    if not path:
+        # Path("") is the current folder: never go looking there.
+        raise ImportFailed("The download client said it finished but gave no folder for it")
     files = _comic_files(path)
     if not files:
         raise ImportFailed(f"No comic files found in {path}")
@@ -343,9 +376,13 @@ def import_grab(db: Session, g: Grab, path: str) -> str:
     for f in files:
         if len(files) == 1 and len(issues) == 1:
             issue = next(iter(issues.values()))
+            said = _file_number(f, series, confident=True)
+            if said is not None and said != normalize_number(issue.number):
+                # The file says it's another issue: never import it under this one's name.
+                skipped.append(f"{f.name}: the file is #{said}, not #{issue.number}")
+                continue
         else:
-            num = parse_issue_number(f.name, series.name) or parse_issue_number(f.name, series.mylar_name)
-            want = normalize_number(num) if num else None
+            want = _file_number(f, series)
             issue = next((i for i in issues.values() if normalize_number(i.number) == want), None)
         if issue is None:
             skipped.append(f"{f.name}: no matching issue")
@@ -443,6 +480,17 @@ async def check_downloads(session_factory, on_failed=None, before_import=None) -
                 if client is None:
                     client = client_for(db, g.protocol, g.client)
                     if client is None:
+                        # Said, not skipped for ever: a stuck "downloading" would block the issue.
+                        g.state, g.finished = "failed", datetime.now(UTC)
+                        g.message = f"{g.client or g.protocol} isn't set up in Settings any more"
+                        log(
+                            db,
+                            f"Download '{g.release_title}' failed: {g.message}",
+                            kind="grab",
+                            level="error",
+                        )
+                        db.commit()
+                        changed += 1
                         continue
                     clients[g.client] = client
                 if not g.client_job_id:

@@ -17,7 +17,6 @@ issue's full record when tagging is on. Nothing is ever overwritten: an issue
 that has a file, or a name that's taken, is skipped.
 """
 
-import asyncio
 import os
 import re
 import xml.etree.ElementTree as ET
@@ -313,7 +312,7 @@ def make_manual_import_handler(before_import=None):
         ctx.update(phase="importing", total=len(items), progress=len(done))
         counts = {"imported": 0, "skipped": 0}
         for n, it in enumerate(todo, len(done) + 1):
-            msg = await asyncio.to_thread(_import_one, sf, it["path"], it["issue_id"], keep, tag_on)
+            msg = await ctx.thread(_import_one, sf, it["path"], it["issue_id"], keep, tag_on)
             counts["imported" if msg is None else "skipped"] += 1
             done.add(it["path"])
             ctx.update(progress=n, params={**params, "done": sorted(done)})

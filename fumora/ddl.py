@@ -283,6 +283,9 @@ def _unpack(path: Path) -> None:
         listing = _bsdtar("-tf", str(path))
     except ArchiveError:
         return
+    if listing.returncode != 0:
+        msg = listing.stderr.decode(errors="replace").strip()[:200]
+        raise ArchiveError(f"couldn't read {path.name} (damaged or password-protected?): {msg}")
     names = [n for n in listing.stdout.decode(errors="replace").splitlines() if n and not n.endswith("/")]
     if any(n.lower().endswith(COMIC_INSIDE) for n in names):
         out = _bsdtar("-xf", str(path), "-C", str(path.parent))

@@ -88,9 +88,15 @@ async def update_releases(db: Session, client: MetronClient, today: date | None 
         row.image = mi.get("image")
         row.fetched = datetime.now(UTC)
         n += 1
-    for gone in db.scalars(
-        select(Release).where(
-            Release.store_date >= start, Release.store_date <= end, Release.metron_issue_id.not_in(seen)
+    # An empty answer is far likelier a Metron hiccup than an empty five weeks:
+    # keep what we have rather than wipe the schedule.
+    for gone in (
+        []
+        if not seen
+        else db.scalars(
+            select(Release).where(
+                Release.store_date >= start, Release.store_date <= end, Release.metron_issue_id.not_in(seen)
+            )
         )
     ):
         db.delete(gone)
@@ -194,6 +200,11 @@ def make_refresh_handler(make_client):
                         db.rollback()
                         totals["errors"] += 1
                         log(db, f"Refresh failed for series {series_id}: {exc}", kind=REFRESH, level="error")
+                        # Back of the queue, or a series that keeps failing (deleted on
+                        # Metron, say) would take a slot of every daily batch for ever.
+                        failed = db.get(Series, series_id)
+                        if failed is not None:
+                            failed.issues_synced = datetime.now(UTC)
                         db.commit()
                 ctx.update(progress=n)
             checks = None

@@ -119,6 +119,8 @@ def register_catalog_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
                 else:
                     async with _client(db) as client:
                         results = await client.search_series(q.strip(), max_pages=1)
+            except HTTPException as exc:  # no Metron login / ComicVine key saved yet
+                error = exc.detail
             except (MetronError, ComicVineError) as exc:
                 error = str(exc)
         ours = {s.metron_id: s for s in db.scalars(select(Series).where(Series.metron_id.is_not(None)))}

@@ -1,4 +1,5 @@
 import asyncio
+import html
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -24,7 +25,7 @@ from .downloaders import DownloaderError
 from .getcomics import GetComicsClient, GetComicsError
 from .import_job import KIND as MYLAR_IMPORT
 from .import_job import make_handler as make_import_handler
-from .jobs import JobRunner
+from .jobs import JobBusy, JobRunner
 from .library_jobs import ORGANIZE, RETAG, SCAN, make_organize_handler, make_retag_handler, make_scan_handler
 from .manual_import import MANUAL_IMPORT, make_manual_import_handler
 from .metron import MetronAuthError, MetronClient, MetronError, RateLimiter
@@ -113,6 +114,14 @@ def create_app(config: Config | None = None) -> FastAPI:
         engine.dispose()
 
     app = FastAPI(title="Fumora", version=__version__, lifespan=lifespan)
+
+    @app.exception_handler(JobBusy)
+    async def job_busy(_request: Request, exc: JobBusy):
+        return HTMLResponse(
+            f'<p>{html.escape(str(exc))}</p><p><a href="/jobs">Jobs</a> · <a href="/">Dashboard</a></p>',
+            status_code=409,
+        )
+
     app.state.config = config
     app.state.session_factory = SessionLocal
     app.state.metron_limiter = metron_limiter
@@ -174,7 +183,9 @@ def create_app(config: Config | None = None) -> FastAPI:
         if db.scalar(select(func.count()).select_from(User)):
             return RedirectResponse("/login", status_code=303)
         error = None
-        if len(password) < 8:
+        if not username.strip():
+            error = "Enter a username."
+        elif len(password) < 8:
             error = "Password must be at least 8 characters."
         elif password != password2:
             error = "Passwords do not match."

@@ -158,8 +158,13 @@ class Series(Base):
 
     @property
     def writable(self) -> bool:
-        """Fumora may write this series' files: its Metron match (if any) is confirmed."""
-        return not (self.match_status == "matched" and self.confirmed_by is None)
+        """Fumora may write this series' files: its Metron match is confirmed, or it has
+        none pending (not on Metron / followed from ComicVine)."""
+        if self.match_status == "matched":
+            return self.confirmed_by is not None
+        # A suggestion waiting for review (or accepted, not yet applied) or a series
+        # not matched yet would be renamed and tagged twice: wait until it's settled.
+        return self.match_status not in ("review", "accepted", "pending")
 
     issues: Mapped[list["Issue"]] = relationship(back_populates="series", cascade="all, delete-orphan")
     tags: Mapped[list[Tag]] = relationship(secondary=series_tag)

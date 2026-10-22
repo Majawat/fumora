@@ -1,4 +1,3 @@
-import httpx
 import respx
 from sqlalchemy import select
 
@@ -188,10 +187,6 @@ async def test_job_fails_cleanly_without_mylar_db(app, tmp_path):
                 break
     assert job.state == "failed"
     assert "Mylar database not found" in job.message
-
-
-def test_respx_unused_guard():
-    assert httpx  # keep import for respx side effects
 
 
 @respx.mock

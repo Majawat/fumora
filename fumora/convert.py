@@ -20,6 +20,7 @@ from datetime import date
 from pathlib import Path
 
 from .cbz import IMAGE_EXTS, ArchiveError
+from .perms import normalize
 
 CONVERTIBLE_EXTS = {".cbr", ".cb7", ".cbt", ".rar", ".7z", ".pdf"}
 # 300 dpi renders a 6.6 x 10.2 inch comic page at about 1990 x 3060 px, the
@@ -212,7 +213,7 @@ def convert_to_cbz(path: str | Path, recycle_dir: str | Path | None) -> Path:
         with zipfile.ZipFile(tmp_zip) as check:
             if check.testzip() is not None or len(check.infolist()) != len(members):
                 raise ArchiveError(f"Verification failed converting {path.name}")
-        os.chmod(tmp_zip, path.stat().st_mode & 0o7777)
+        normalize(tmp_zip)  # a new file: Fumora's 664, not the old archive's mode
         if target == path:
             # A ".cbz" that is really a RAR: move the original away first, so it
             # is never overwritten.

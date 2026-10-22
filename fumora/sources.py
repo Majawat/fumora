@@ -71,10 +71,12 @@ def apply_cv_issues(db: Session, series: Series, cv_issues: list[dict]) -> dict[
             continue
         cover, store = _parse_date(ci.get("cover_date")), _parse_date(ci.get("store_date"))
         issue, created = listed_issue(db, series, by_number, number, store or cover)
+        if issue.cv_id not in (None, ci.get("id")):
+            continue  # another ComicVine issue with this number (a variant): keep the first
         if issue.cv_id is None:
             issue.cv_id = ci.get("id")
         updated = ci.get("date_last_updated")
-        if issue.cv_detail and issue.cv_id == ci.get("id") and updated:
+        if issue.cv_detail is not None and issue.cv_id == ci.get("id") and updated:
             if updated != issue.cv_detail.get("date_last_updated"):
                 issue.cv_detail = None  # ComicVine changed it: fetched again before the next tagging
         changed = apply_listed_values(
@@ -319,6 +321,9 @@ async def run_metron_checks(ctx: JobContext, client: MetronClient) -> dict[str, 
             except Exception as exc:  # noqa: BLE001 - logged; the refresh carries on
                 db.rollback()
                 counts["errors"] += 1
+                failed = db.get(Series, series_id)
+                if failed is not None:
+                    failed.metron_checked = datetime.now(UTC)  # back of the monthly queue
                 log(
                     db,
                     f"Metron check failed for series {series_id}: {exc}",

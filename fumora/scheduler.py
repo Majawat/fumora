@@ -72,16 +72,23 @@ async def run_download_monitor(session_factory, jobs=None, every: int = 60, befo
     """Follow downloads every minute and import the finished ones; a failed one
     starts a new search for its issue (see grabbing.retry_candidates)."""
 
+    pending: list[int] = []  # retries waiting for a running search to finish
+
     def search_again(issue_ids: list[int]) -> None:
         if jobs is None:
             return
+        pending.extend(i for i in issue_ids if i not in pending)
         if jobs.active(SEARCH) is not None:
-            log.info("download failed for %s; a search is running, so not searching again now", issue_ids)
+            log.info("download failed for %s; searching again once the running search ends", issue_ids)
             return
-        jobs.start(SEARCH, {"issue_ids": issue_ids, "retry": True})
+        jobs.start(SEARCH, {"issue_ids": list(pending), "retry": True})
+        pending.clear()
 
     while True:
         try:
+            if pending and jobs is not None and jobs.active(SEARCH) is None:
+                jobs.start(SEARCH, {"issue_ids": list(pending), "retry": True})
+                pending.clear()
             await check_downloads(session_factory, on_failed=search_again, before_import=before_import)
         except Exception:
             log.exception("download check failed")

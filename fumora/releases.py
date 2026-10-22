@@ -90,13 +90,23 @@ def _pick_issue(matches: list[re.Match]) -> re.Match:
 
 def series_key(name: str | None) -> str:
     s = html.unescape(name or "").lower().replace("&", "and")
+    # Dots/underscores count as spaces here, so "The.Walking.Dead" keys like "The Walking Dead"
+    # whether or not the title was de-dotted.
+    s = re.sub(r"[._]+", " ", s)
     s = re.sub(r"^the\s+", "", s)
     return re.sub(r"[^a-z0-9]", "", s)
 
 
 def _scene_to_spaces(title: str) -> str:
     """'DC.Comics-Absolute.Batman.No.02.2024.HYBRID.COMIC' -> spaced words."""
-    if " " in title or title.count(".") < 2 and title.count("_") < 2:
+
+    # Scene style if a word is dotted and carries a number ("X-Men.001.2024 [Digital-Empire]",
+    # whatever the tags around it) or is underscored. Abbreviations ("U.S.A.", "G.I. Joe",
+    # "B.P.R.D. 001") and "Mr. Miracle" or "Vol. 2" keep their dots.
+    def scene(w: str) -> bool:
+        return (w.count(".") >= 2 and any(ch.isdigit() for ch in w)) or w.count("_") >= 2
+
+    if not any(scene(w) for w in title.split()):
         return title
     out = re.sub(r"(?<=No)\.(?=\d)", " ", title)  # No.02 -> No 02
     out = re.sub(r"(\d)\.(?=(?:19|20)\d{2}(?!\d))", r"\1 ", out)  # 009.2025 -> 009 2025 (issue, year)
@@ -109,6 +119,9 @@ def parse_release(title: str) -> ParsedRelease:
     r = ParsedRelease(title=raw)
     # GetComics writes ranges and subtitles with en/em dashes ("#20 – 23").
     text = _scene_to_spaces(raw.replace("–", "-").replace("—", "-"))
+    # "Issue 1 through 100" / "Issues 1 thru 12": an issue range, written out. Only after
+    # "Issue(s)": "Vol 1 through 5" stays volumes.
+    text = re.sub(r"(?i)\bissues?\s+(\d{1,4})\s+(?:through|thru)\s+(\d{1,4})\b", r"\1-\2", text)
     lowered = text.lower()
 
     # MyAnonamouse: "... by Author, Publisher [ENG / CBZ] [VIP]" -> formats, language, drop authors.
@@ -224,7 +237,7 @@ def parse_release(title: str) -> ParsedRelease:
     series = head if head is not None else body
     series = re.sub(r"\s+-\s*$|[-:#,]+\s*$", "", series.strip())
     series = re.sub(r"\s+", " ", series).strip(" -_.")
-    if vm2 := re.search(r"\s+v(\d{1,4})$", series, re.I):  # "Batman v3", "Batman v2016"
+    if vm2 := re.search(r"\s+v(?:ol(?:ume)?)?\.?\s*(\d{1,4})$", series, re.I):  # "Batman v3", "Vol. 3"
         r.volume = r.volume or vm2.group(1)
         series = series[: vm2.start()].strip()
     series = re.sub(r"\s+(?:19|20)\d{2}\s*-\s*(?:19|20)\d{2}$", "", series)  # trailing year span
