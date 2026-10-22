@@ -17,7 +17,8 @@ jobs:
         with:
           python-version: "3.14"
           cache: pip
-      - run: sudo apt-get install -y libarchive-tools poppler-utils
+      # Refresh the package list first: a stale one 404s as soon as Ubuntu updates a package.
+      - run: sudo apt-get update && sudo apt-get install -y libarchive-tools poppler-utils
       - run: pip install -e '.[dev]'
       - name: Lint
         run: |
