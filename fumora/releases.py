@@ -90,6 +90,9 @@ def _pick_issue(matches: list[re.Match]) -> re.Match:
 
 def series_key(name: str | None) -> str:
     s = html.unescape(name or "").lower().replace("&", "and")
+    # Dots/underscores count as spaces here, so "The.Walking.Dead" keys like "The Walking Dead"
+    # whether or not the title was de-dotted.
+    s = re.sub(r"[._]+", " ", s)
     s = re.sub(r"^the\s+", "", s)
     return re.sub(r"[^a-z0-9]", "", s)
 
@@ -116,6 +119,8 @@ def parse_release(title: str) -> ParsedRelease:
     r = ParsedRelease(title=raw)
     # GetComics writes ranges and subtitles with en/em dashes ("#20 – 23").
     text = _scene_to_spaces(raw.replace("–", "-").replace("—", "-"))
+    # "Issue 1 through 100", "1 thru 12": a range, written out.
+    text = re.sub(r"(?i)(\d)\s+(?:through|thru)\s+(\d)", r"\1-\2", text)
     lowered = text.lower()
 
     # MyAnonamouse: "... by Author, Publisher [ENG / CBZ] [VIP]" -> formats, language, drop authors.

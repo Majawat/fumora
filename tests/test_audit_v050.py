@@ -362,6 +362,13 @@ def test_25_30_release_names(app):
                           ("B.P.R.D. 001 (2002)", "B.P.R.D")):  # fmt: skip
         r = parse_release(title)
         assert (r.series, r.number) == (series, "1"), title
+    from fumora.releases import matches_issue, series_key
+
+    r = parse_release("The.Walking.Dead 001 (2003) (Digital) (Zone-Empire)")  # dotted name, spaced rest
+    assert series_key(r.series) == series_key("The Walking Dead") and r.number == "1"
+    assert matches_issue(r, ["The Walking Dead"], "1", (2003, 2003))
+    r = parse_release("X-Men.Volume.1.Issue.1.through.100.CBZ [ENG / CBZ]")  # a 100-issue pack, not #1
+    assert (r.kind, r.range_start, r.range_end) == ("range", 1, 100)
     r = parse_release("Batman Vol. 3 016 (2016) (Digital)")
     assert (r.series, r.number, r.volume) == ("Batman", "16", "3")
 
