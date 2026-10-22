@@ -15,6 +15,7 @@ page is rendered at PDF_DPI as a JPEG.
 import os
 import shutil
 import subprocess
+import uuid
 import zipfile
 from datetime import date
 from pathlib import Path
@@ -163,6 +164,36 @@ def _recycle(path: Path, recycle_dir: Path | None) -> Path | None:
     return target
 
 
+def _write_cbz(src: Path, kind: str, out: Path, work: Path) -> None:
+    """Unpack `src` (a `kind` archive or PDF) into `work` and write its pages to a new,
+    verified zip at `out`, with Fumora's permissions. `src` is only read."""
+    if kind == "pdf":
+        _pdf_pages(src, work)
+    else:
+        res = _bsdtar("-xf", str(src), "-C", str(work), "--no-same-owner", "--no-same-permissions")
+        if res.returncode != 0:
+            raise ArchiveError(f"Cannot unpack {src.name}: {res.stderr.decode(errors='replace').strip()}")
+    members = []
+    for root, dirs, files in os.walk(work, followlinks=False):
+        dirs[:] = sorted(d for d in dirs if d.lower() not in _JUNK)
+        for name in sorted(files):
+            full = Path(root) / name
+            if name.lower() in _JUNK or full.is_symlink() or not full.is_file():
+                continue
+            members.append(full)
+    if not any(m.suffix.lower() in IMAGE_EXTS for m in members):
+        raise ArchiveError(f"{src.name} contains no images")
+    with zipfile.ZipFile(out, "w") as zf:
+        for m in members:
+            arc = m.relative_to(work).as_posix()
+            stored = m.suffix.lower() in IMAGE_EXTS  # images are already compressed
+            zf.write(m, arc, compress_type=zipfile.ZIP_STORED if stored else zipfile.ZIP_DEFLATED)
+    with zipfile.ZipFile(out) as check:
+        if check.testzip() is not None or len(check.infolist()) != len(members):
+            raise ArchiveError(f"Verification failed converting {src.name}")
+    normalize(out)  # a new file: Fumora's 664, not the old archive's mode
+
+
 def convert_to_cbz(path: str | Path, recycle_dir: str | Path | None) -> Path:
     """Convert one file to .cbz next to it; returns the new path.
 
@@ -187,33 +218,7 @@ def convert_to_cbz(path: str | Path, recycle_dir: str | Path | None) -> Path:
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir()
     try:
-        if kind == "pdf":
-            _pdf_pages(path, work)
-        else:
-            out = _bsdtar("-xf", str(path), "-C", str(work), "--no-same-owner", "--no-same-permissions")
-            if out.returncode != 0:
-                raise ArchiveError(
-                    f"Cannot unpack {path.name}: {out.stderr.decode(errors='replace').strip()}"
-                )
-        members = []
-        for root, dirs, files in os.walk(work, followlinks=False):
-            dirs[:] = sorted(d for d in dirs if d.lower() not in _JUNK)
-            for name in sorted(files):
-                full = Path(root) / name
-                if name.lower() in _JUNK or full.is_symlink() or not full.is_file():
-                    continue
-                members.append(full)
-        if not any(m.suffix.lower() in IMAGE_EXTS for m in members):
-            raise ArchiveError(f"{path.name} contains no images")
-        with zipfile.ZipFile(tmp_zip, "w") as zf:
-            for m in members:
-                arc = m.relative_to(work).as_posix()
-                stored = m.suffix.lower() in IMAGE_EXTS  # images are already compressed
-                zf.write(m, arc, compress_type=zipfile.ZIP_STORED if stored else zipfile.ZIP_DEFLATED)
-        with zipfile.ZipFile(tmp_zip) as check:
-            if check.testzip() is not None or len(check.infolist()) != len(members):
-                raise ArchiveError(f"Verification failed converting {path.name}")
-        normalize(tmp_zip)  # a new file: Fumora's 664, not the old archive's mode
+        _write_cbz(path, kind, tmp_zip, work)
         if target == path:
             # A ".cbz" that is really a RAR: move the original away first, so it
             # is never overwritten.
@@ -225,6 +230,34 @@ def convert_to_cbz(path: str | Path, recycle_dir: str | Path | None) -> Path:
         return target
     except OSError as exc:
         raise ArchiveError(f"Cannot convert {path.name}: {exc}") from exc
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+        tmp_zip.unlink(missing_ok=True)
+
+
+def convert_into(src: str | Path, target: str | Path) -> Path:
+    """Write `src` (CBR/CB7/CBT/PDF, or a zip under another name) as a new CBZ at
+    `target`, e.g. a download straight into the library: one write, no copy of the
+    original first. `src` is only read and stays where it is. Never overwrites."""
+    src, target = Path(src), Path(target)
+    if target.exists():
+        raise ArchiveError(f"{target.name} already exists")
+    kind = sniff(src)
+    if kind not in ("zip", "rar", "7z", "tar", "pdf"):
+        raise ArchiveError(f"{src.name}: not a comic archive Fumora can convert ({kind or 'unknown format'})")
+    # The pages are unpacked next to the target, so a read-only download folder is fine.
+    tag = uuid.uuid4().hex[:8]
+    work = target.with_name(f".{target.stem}.fumora-convert-{tag}")
+    tmp_zip = target.with_name(f".{target.stem}.fumora-tmp-{tag}.cbz")
+    work.mkdir()
+    try:
+        _write_cbz(src, kind, tmp_zip, work)
+        if target.exists():  # appeared meanwhile: never replaced
+            raise ArchiveError(f"{target.name} already exists")
+        os.replace(tmp_zip, target)
+        return target
+    except OSError as exc:
+        raise ArchiveError(f"Cannot convert {src.name}: {exc}") from exc
     finally:
         shutil.rmtree(work, ignore_errors=True)
         tmp_zip.unlink(missing_ok=True)

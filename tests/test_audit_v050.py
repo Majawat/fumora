@@ -62,7 +62,9 @@ def test_1_converting_a_library_file_in_place_recycles_the_original(app, tmp_pat
     assert len(recycled) == 1 and recycled[0].read_bytes() == raw  # the original is kept
 
 
-def test_2_a_converted_download_obeys_the_same_mount_rule(tmp_path, monkeypatch):
+def test_2_a_converted_download_is_a_new_file_so_another_mount_is_fine(tmp_path, monkeypatch):
+    # 0.5.1 refused this; #31 writes the CBZ straight from the download (no copy, no move),
+    # so the mount no longer matters for conversions. Moves and hardlinks still refuse.
     src = _cbr_download(tmp_path / "dl", "x.cbr")
     dest = tmp_path / "lib" / "x.cbr"
     dest.parent.mkdir()
@@ -75,8 +77,8 @@ def test_2_a_converted_download_obeys_the_same_mount_rule(tmp_path, monkeypatch)
         return st
 
     monkeypatch.setattr(Path, "stat", fake_stat)
-    with pytest.raises(ImportFailed, match="different mounts"):
-        _place_converted(src, dest)
+    out = _place_converted(src, dest)
+    assert out == dest.with_suffix(".cbz") and zipfile.is_zipfile(out) and src.exists()
 
 
 def test_3_organize_never_nests_a_series_deeper(app, tmp_path):
