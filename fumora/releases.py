@@ -43,12 +43,16 @@ SCENE_PUBLISHERS = (
 _YEAR = re.compile(r"^(19[0-9]{2}|20[0-9]{2})(?:[-.][0-9]{1,2})?$")
 _GROUP = re.compile(r"^(.+?)-(empire|dcp|novus|no ads|noads)$", re.I)
 _RANGE = re.compile(r"(?<![\w.])#?\s?(\d{1,4})\s?-\s?#?(\d{1,4})(?![\w])")
-_VOL_MARK = r"(?:vol(?:ume)?s?\.?\s*|v\.?(?=\d)|tpbs?\s*|books?\s*|t(?=\d{2}\b)|tome\s*)"
+_WORD_MARK = r"(?:vol(?:ume)?s?\.?\s*|tpbs?\s*|books?\s*|tome\s*)"
+_SHORT_MARK = r"(?:v\.?(?=\d)|t(?=\d{2}\b))"
+_VOL_MARK = rf"(?:{_WORD_MARK}|{_SHORT_MARK})"
 _VOLUME = re.compile(rf"(?<![\w]){_VOL_MARK}(\d{{1,3}})(?![\w])", re.I)
-# A pack of volumes: "Vol.1 - Vol.9", "v01-29", "TPB 1-4", "Book 1-7", "Vol 1 through 5". The
-# second number follows the first straight after a dash ("Batman v2 01-12" is issues of v2).
+# A pack of volumes: "Vol.1 - Vol.9", "Vol. 1 - 15", "TPB 1-4", "Book 1-7", "Vol 1 through 5",
+# "v01-29", "v01 - v32". After a bare "v" the second number must follow the dash directly or
+# carry its own "v": "Batman v1 - 05" is issue 5 of volume 1, "Batman v2 01-12" issues of v2.
 _VOLUMES = re.compile(
-    rf"(?<![\w]){_VOL_MARK}(\d{{1,3}})\s*(?:-|\bthrough\b|\bthru\b)\s*(?:{_VOL_MARK})?(\d{{1,3}})(?![\w])",
+    rf"(?<![\w])(?:{_WORD_MARK}(\d{{1,3}})\s*(?:-|\bthrough\b|\bthru\b)\s*(?:{_VOL_MARK})?"
+    rf"|{_SHORT_MARK}(\d{{1,3}})(?:-|\s*-\s*{_SHORT_MARK}|\s+(?:through|thru)\s+))(\d{{1,3}})(?![\w])",
     re.I,
 )
 _ISSUE = re.compile(
@@ -208,6 +212,12 @@ def parse_release(title: str) -> ParsedRelease:
     body = re.sub(r"\.(cbz|cbr|cb7|zip|rar|pdf|epub)$", "", body.strip(), flags=re.I)
     body = re.sub(r"\b(ongoing|complete|fcbd)\b", " ", body, flags=re.I)
 
+    # Variant covers in the name ("001 Cover B", "001 Jim Lee Variant", "1 1:25") are the
+    # same issue; only flagged. The ratio is no issue number ("Batman 1 1:25" is #1).
+    if re.search(r"\b(variant|virgin|cover [a-z])\b|(?<![\w:])1:\d+\b", body, re.I):
+        r.variant = True
+    body = re.sub(r"(?<![\w:])1:\d+\b", " ", body)
+
     # Number: range, then volume, then single issue. The series name is what precedes it.
     def take(match: re.Match, kind: str) -> str:
         r.kind = kind
@@ -218,10 +228,11 @@ def parse_release(title: str) -> ParsedRelease:
     vs = _VOLUMES.search(body)
     if r.kind == "range":  # found in a bracket tag: the series is everything before the tags
         head = body
-    elif vs and int(vs.group(1)) < int(vs.group(2)):
+    elif vs and int(vs.group(1) or vs.group(2)) < int(vs.group(3)):
         head = take(vs, "volumes")
-        r.range_start, r.range_end = int(vs.group(1)), int(vs.group(2))
-        r.number = normalize_number(vs.group(1))
+        first = vs.group(1) or vs.group(2)
+        r.range_start, r.range_end = int(first), int(vs.group(3))
+        r.number = normalize_number(first)
     elif (
         rm
         and int(rm.group(1)) < int(rm.group(2))
@@ -253,10 +264,6 @@ def parse_release(title: str) -> ParsedRelease:
         for m in _ISSUE.finditer(body):  # a plausible year in the body
             if len(m.group(1)) == 4 and _plausible_year(m.group(1)) and r.year is None:
                 r.year = int(m.group(1))
-    # Variant covers in the name ("001 Cover B", "001 Jim Lee Variant", "001 1:25") are the
-    # same issue; only flagged.
-    if re.search(r"\b(variant|virgin|cover [a-z])\b|(?<![\w:])1:\d+\b", body, re.I):
-        r.variant = True
     if r.year is None:
         y = re.search(r"(?<!\d)(19[5-9]\d|20[0-4]\d)(?!\d)", body)
         if y:

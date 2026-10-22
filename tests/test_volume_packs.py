@@ -42,6 +42,23 @@ def test_issues_of_a_volume_stay_issues():
     assert (r.kind, r.range_start, r.range_end) == ("range", 1, 138)
 
 
+def test_a_dash_after_a_bare_v_is_not_a_volume_pack():
+    # Gemini review of #33: "v1 - 05" is issue 5 of volume 1, not volumes 1-5.
+    r = parse_release("Batman v1 - 05 (2011).cbr")
+    assert (r.series, r.kind, r.number, r.volume) == ("Batman", "issue", "5", "1")
+    r = parse_release("The Walking Dead v01 - v32")  # its own "v": a pack
+    assert (r.kind, r.range_start, r.range_end) == ("volumes", 1, 32)
+    r = parse_release("G.I. Joe: Classics Vol. 1 - 15")  # a word marker: a pack
+    assert (r.kind, r.range_start, r.range_end) == ("volumes", 1, 15)
+
+
+def test_a_variant_ratio_is_not_the_issue_number():
+    # Gemini review of #33: "Batman 1 1:25" read as issue #25 of "Batman 1 1".
+    for title, number in (("Batman 1 1:25 (2016).cbz", "1"), ("Batman 12 1:50 (2016)", "12")):
+        r = parse_release(title)
+        assert (r.series, r.kind, r.number, r.variant) == ("Batman", "issue", number, True)
+
+
 def test_year_volumes():
     r = parse_release("Batman v2016 001 (2016) (Digital) (Zone-Empire)")
     assert (r.series, r.kind, r.number, r.volume, r.year) == ("Batman", "issue", "1", "2016", 2016)
