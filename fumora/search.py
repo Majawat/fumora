@@ -163,7 +163,7 @@ def evaluate(release: dict, issue: Issue, profile: Profile) -> Candidate:
         c.identified = matches_issue(rel, names, issue.number, years, strict=False)
         if rel.ebook:
             c.rejections.append("ebook, not a comic archive")
-        elif rel.kind == "volume":
+        elif rel.kind in ("volume", "volumes"):
             c.rejections.append("a collected volume, not this issue")
         else:
             c.rejections.append("not this issue")
@@ -177,7 +177,8 @@ def evaluate(release: dict, issue: Issue, profile: Profile) -> Candidate:
             c.hold = f"language: {c.language}"
 
     size = c.size_mb
-    limit = profile.max_collected_mb if (collected or as_volumes or rel.kind == "range") else profile.max_mb
+    pack = rel.kind in ("range", "volumes")
+    limit = profile.max_collected_mb if (collected or as_volumes or pack) else profile.max_mb
     if size and size < profile.min_mb:
         c.rejections.append(f"too small ({size:.0f} MB)")
     if size > limit:
@@ -191,7 +192,7 @@ def evaluate(release: dict, issue: Issue, profile: Profile) -> Candidate:
         c.rejections.append(f"{c.protocol} disabled")
     if c.protocol == "torrent" and (release.get("seeders") or 0) == 0:
         c.rejections.append("no seeders")
-    if rel.kind == "range" and not profile.allow_packs:
+    if pack and not profile.allow_packs:
         c.rejections.append("packs disabled")
 
     score = SOURCE_SCORE.get(rel.source, 200)

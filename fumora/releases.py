@@ -36,8 +36,13 @@ SCENE_PUBLISHERS = (
 _YEAR = re.compile(r"^(19[0-9]{2}|20[0-9]{2})(?:[-.][0-9]{1,2})?$")
 _GROUP = re.compile(r"^(.+?)-(empire|dcp|novus|no ads|noads)$", re.I)
 _RANGE = re.compile(r"(?<![\w.])#?\s?(\d{1,4})\s?-\s?#?(\d{1,4})(?![\w])")
-_VOLUME = re.compile(
-    r"(?<![\w])(?:vol(?:ume)?\.?\s*|v(?=\d)|tpb\s*|book\s*|t(?=\d{2}\b)|tome\s*)(\d{1,3})(?![\w])", re.I
+_VOL_MARK = r"(?:vol(?:ume)?s?\.?\s*|v\.?(?=\d)|tpbs?\s*|books?\s*|t(?=\d{2}\b)|tome\s*)"
+_VOLUME = re.compile(rf"(?<![\w]){_VOL_MARK}(\d{{1,3}})(?![\w])", re.I)
+# A pack of volumes: "Vol.1 - Vol.9", "v01-29", "TPB 1-4", "Book 1-7", "Vol 1 through 5". The
+# second number follows the first straight after a dash ("Batman v2 01-12" is issues of v2).
+_VOLUMES = re.compile(
+    rf"(?<![\w]){_VOL_MARK}(\d{{1,3}})\s*(?:-|\bthrough\b|\bthru\b)\s*(?:{_VOL_MARK})?(\d{{1,3}})(?![\w])",
+    re.I,
 )
 _ISSUE = re.compile(
     r"(?<![\w.])(?:#\s?|no\.?\s?|issue\s)?(-?\d{1,4}(?:\.\d+)?|½)(?:\s?\(of\s\d+\))?(?![\w])", re.I
@@ -48,8 +53,8 @@ _ISSUE = re.compile(
 class ParsedRelease:
     title: str
     series: str = ""
-    kind: str = "unknown"  # issue, range, volume, unknown
-    number: str | None = None  # issue number or volume number
+    kind: str = "unknown"  # issue, range (of issues), volume, volumes (a pack of them), unknown
+    number: str | None = None  # issue number or volume number (the first, for a pack)
     range_start: int | None = None
     range_end: int | None = None
     volume: str | None = None  # "v3" in "Batman v3 016"
@@ -122,6 +127,7 @@ def parse_release(title: str) -> ParsedRelease:
     # "Issue 1 through 100" / "Issues 1 thru 12": an issue range, written out. Only after
     # "Issue(s)": "Vol 1 through 5" stays volumes.
     text = re.sub(r"(?i)\bissues?\s+(\d{1,4})\s+(?:through|thru)\s+(\d{1,4})\b", r"\1-\2", text)
+    text = re.sub(r"(?<![\d/])1/2(?![\d/])", "½", text)  # "Batman 1/2" is issue ½
     lowered = text.lower()
 
     # MyAnonamouse: "... by Author, Publisher [ENG / CBZ] [VIP]" -> formats, language, drop authors.
@@ -142,11 +148,14 @@ def parse_release(title: str) -> ParsedRelease:
             r.year = int(t[:4])
         elif re.match(r"^(19|20)\d{2}[-\s]+(19|20)\d{2}$", t):
             r.year = r.year or int(t[:4])
+        if (yv := re.fullmatch(r"v((?:19|20)\d{2})", t)) and _plausible_year(yv.group(1)):
+            r.volume = yv.group(1)  # Mylar's year volume: "(v2010)"
+            r.year = r.year or int(yv.group(1))
         if _GROUP.match(tag.strip()):
             r.group = tag.strip()
         if re.search(r"\b(\d+\s*covers?|variant|virgin|cover [a-z]|1:\d+)\b", t):
             r.variant = True
-        rm = re.match(r"^#?(\d{1,4})\s?-\s?#?(\d{1,4})$", t)
+        rm = re.match(r"^#?(\d{1,4})\s?-\s?#?(\d{1,4})(?:\s?\+.*)?$", t)  # "(001-046+Extras)"
         if (
             rm
             and not _YEAR.match(rm.group(1))
@@ -197,8 +206,13 @@ def parse_release(title: str) -> ParsedRelease:
 
     head = None
     rm = _RANGE.search(body)
+    vs = _VOLUMES.search(body)
     if r.kind == "range":  # found in a bracket tag: the series is everything before the tags
         head = body
+    elif vs and int(vs.group(1)) < int(vs.group(2)):
+        head = take(vs, "volumes")
+        r.range_start, r.range_end = int(vs.group(1)), int(vs.group(2))
+        r.number = normalize_number(vs.group(1))
     elif (
         rm
         and int(rm.group(1)) < int(rm.group(2))
@@ -230,6 +244,10 @@ def parse_release(title: str) -> ParsedRelease:
         for m in _ISSUE.finditer(body):  # a plausible year in the body
             if len(m.group(1)) == 4 and _plausible_year(m.group(1)) and r.year is None:
                 r.year = int(m.group(1))
+    # Variant covers in the name ("001 Cover B", "001 Jim Lee Variant", "001 1:25") are the
+    # same issue; only flagged.
+    if re.search(r"\b(variant|virgin|cover [a-z])\b|(?<![\w:])1:\d+\b", body, re.I):
+        r.variant = True
     if r.year is None:
         y = re.search(r"(?<!\d)(19[5-9]\d|20[0-4]\d)(?!\d)", body)
         if y:
@@ -247,6 +265,8 @@ def parse_release(title: str) -> ParsedRelease:
         series = series[: ym.start()].strip()
     if r.group is None and " " not in raw and (dg := re.search(r"[.\s]([A-Za-z0-9]+-(?:Empire|DCP))$", raw)):
         r.group = dg.group(1)
+    if r.kind in ("volume", "volumes"):
+        series = re.sub(r"\s+tpbs?$", "", series, flags=re.I)  # "The Walking Dead TPBs v.01-29"
     r.series = series
     return r
 
@@ -287,12 +307,21 @@ def matches_issue(
 
 
 def matches_volume(rel: ParsedRelease, series_names: list[str], number: str, strict: bool = True) -> bool:
-    """A collected volume ("Vol. 3", "TPB 07") for a collected-edition series."""
-    if rel.kind != "volume" or (strict and rel.ebook):
+    """A collected volume ("Vol. 3", "TPB 07"), or a pack of them ("Vol.1 - Vol.9"),
+    for a collected-edition series (or a manga series whose issues are volumes)."""
+    if rel.kind not in ("volume", "volumes") or (strict and rel.ebook):
         return False
     names = {series_key(n) for n in series_names if n}
-    names |= {series_key(re.sub(r"\s+(tpb|hc|omnibus)$", "", n, flags=re.I)) for n in series_names if n}
-    return rel.series_key in names and rel.number == normalize_number(number)
+    names |= {series_key(re.sub(r"\s+(tpbs?|hc|omnibus)$", "", n, flags=re.I)) for n in series_names if n}
+    if rel.series_key not in names:
+        return False
+    want = normalize_number(number)
+    if rel.kind == "volume":
+        return rel.number == want
+    try:
+        return rel.range_start <= float(want) <= rel.range_end
+    except ValueError:
+        return False
 
 
 ARCHIVE_FORMATS = {"cbz", "cbr", "cb7", "cbt"}

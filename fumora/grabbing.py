@@ -104,8 +104,8 @@ def blocklist(db: Session, grab: Grab, reason: str) -> None:
 
 
 def covered_issues(c: Candidate, issue: Issue) -> list[int]:
-    """The issues a release contains: one, or every issue a pack's range covers."""
-    if c.parsed.kind != "range":
+    """The issues a release contains: one, or every issue (or volume) a pack's range covers."""
+    if c.parsed.kind not in ("range", "volumes"):
         return [issue.id]
     lo, hi = c.parsed.range_start, c.parsed.range_end
     ids = []
@@ -209,22 +209,12 @@ def _place(src: Path, dest: Path, protocol: str) -> Path:
 
 
 def _place_converted(src: Path, dest: Path) -> Path:
-    """Convert a CBR/CB7/CBT download into a new CBZ at `dest` (.cbz). The
-    download is only read; it stays where it is until the CBZ is in place."""
+    """Convert a CBR/CB7/CBT/PDF download straight into a new CBZ at `dest` (.cbz).
+    The download is only read (it stays where it is until the CBZ is in place) and
+    the data is written once. A new file either way, so the download may sit on
+    another mount; moves and hardlinks still may not (see _place)."""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if src.stat().st_dev != dest.parent.stat().st_dev:
-        # Same rule as every other import: no silent copy across mounts.
-        raise _same_mount_error(OSError(errno.EXDEV, "different mounts"))
-    tmp = dest.parent / f".fumora-import-{uuid.uuid4().hex[:8]}{src.suffix.lower()}"
-    try:
-        shutil.copyfile(src, tmp)
-        converted = convert.convert_to_cbz(tmp, None)  # removes the temporary copy
-        final = dest.with_suffix(".cbz")
-        os.replace(converted, final)
-        return final
-    finally:
-        tmp.unlink(missing_ok=True)
-        tmp.with_suffix(".cbz").unlink(missing_ok=True)
+    return convert.convert_into(src, dest.with_suffix(".cbz"))
 
 
 def _remove_download_folder(path: str, category: str) -> None:
