@@ -119,8 +119,9 @@ def parse_release(title: str) -> ParsedRelease:
     r = ParsedRelease(title=raw)
     # GetComics writes ranges and subtitles with en/em dashes ("#20 – 23").
     text = _scene_to_spaces(raw.replace("–", "-").replace("—", "-"))
-    # "Issue 1 through 100", "1 thru 12": a range, written out.
-    text = re.sub(r"(?i)(\d)\s+(?:through|thru)\s+(\d)", r"\1-\2", text)
+    # "Issue 1 through 100" / "Issues 1 thru 12": an issue range, written out. Only after
+    # "Issue(s)": "Vol 1 through 5" stays volumes.
+    text = re.sub(r"(?i)\bissues?\s+(\d{1,4})\s+(?:through|thru)\s+(\d{1,4})\b", r"\1-\2", text)
     lowered = text.lower()
 
     # MyAnonamouse: "... by Author, Publisher [ENG / CBZ] [VIP]" -> formats, language, drop authors.

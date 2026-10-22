@@ -24,6 +24,7 @@ from .models import Event, File, Imprint, Issue, Publisher, Series
 from .monitoring import new_issue_monitored
 from .mylar import MylarSeries
 from .numbers import normalize_number, sort_number
+from .releases import series_key
 
 
 @dataclass
@@ -200,10 +201,8 @@ def apply_metron_series(db: Session, series: Series, data: dict) -> None:
     series.last_synced = datetime.now(UTC)
 
 
-def _name_key(name: str | None) -> str:
-    s = (name or "").lower().replace("&", "and")
-    s = re.sub(r"^the\s+", "", s)
-    return re.sub(r"[^a-z0-9]", "", s)
+# One way to compare series names everywhere (dots and underscores count as spaces).
+_name_key = series_key
 
 
 def _taken_by(db: Session, metron_id: int, series: Series) -> Series | None:
