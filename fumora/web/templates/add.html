@@ -34,7 +34,7 @@
 </div>
 <p class="muted small">Showing up to 100 results; narrow the search if yours isn't listed.</p>
 {% elif results %}
-<p class="muted small">ComicVine is the fallback: a series Metron has is added from Metron instead (checked when you pick it). ComicVine series move to Metron by themselves once Metron has them and everything agrees.</p>
+<p class="muted small">ComicVine's search doesn't say how many issues a series has (its page does, once you pick it). ComicVine is the fallback: a series Metron has is added from Metron instead (checked when you pick it). ComicVine series move to Metron by themselves once Metron has them and everything agrees.</p>
 <div class="scroll">
 <table class="log">
   <thead><tr><th>Series</th><th>Start</th><th>Issues</th><th></th></tr></thead>
@@ -43,7 +43,7 @@
   <tr>
     <td><a href="{{ r.site_detail_url }}" target="_blank" rel="noopener">{{ r.name }}</a><small class="muted why">{{ (r.publisher or {}).get('name', '') }}</small></td>
     <td>{{ r.start_year or "" }}</td>
-    <td>{{ r.count_of_issues }}</td>
+    <td>{{ r.count_of_issues or "" }}</td>
     <td>{% if r.id in ours_cv %}<a href="/series/{{ ours_cv[r.id].id }}">In library</a>{% else %}<a class="button small" href="/add/cv/{{ r.id }}">Add</a>{% endif %}</td>
   </tr>
   {% endfor %}

@@ -77,10 +77,16 @@ class ParsedRelease:
     ebook: bool = False
     variant: bool = False
     tags: list[str] = field(default_factory=list)
+    # A scene name may start with the writer: "Kelly.Thompson-Absolute.Wonder.Woman.017".
+    alt_series: str | None = None
 
     @property
     def series_key(self) -> str:
         return series_key(self.series)
+
+    @property
+    def series_keys(self) -> set[str]:
+        return {series_key(n) for n in (self.series, self.alt_series) if n}
 
 
 def _plausible_year(text: str) -> bool:
@@ -110,6 +116,8 @@ def series_key(name: str | None) -> str:
     # whether or not the title was de-dotted.
     s = re.sub(r"[._]+", " ", s)
     s = re.sub(r"^the\s+", "", s)
+    # "X Annual 2026" (release names) and "X 2026 Annual" (Metron) are the same annual.
+    s = re.sub(r"\b(annual|special)\s+((?:19|20)\d{2})\s*$", r"\2 \1", s.strip())
     return re.sub(r"[^a-z0-9]", "", s)
 
 
@@ -126,6 +134,13 @@ def _scene_to_spaces(title: str) -> str:
         return title
     out = re.sub(r"(?<=No)\.(?=\d)", " ", title)  # No.02 -> No 02
     out = re.sub(r"(\d)\.(?=(?:19|20)\d{2}(?!\d))", r"\1 ", out)  # 009.2025 -> 009 2025 (issue, year)
+    # Between digits a dot is a decimal issue ("1.5", "0.1") unless a side is 3+ digits:
+    # "Spider-Man.2099.025.2017" is series 2099, issue 025, year 2017.
+    out = re.sub(
+        r"(\d+)\.(?=(\d+))",
+        lambda m: m.group(1) + (" " if max(len(m.group(1)), len(m.group(2))) >= 3 else "."),
+        out,
+    )
     out = re.sub(r"(?<!\d)\.(?!\d)|\.(?=\D)|(?<=\D)\.", " ", out)
     return out.replace("_", " ")
 
@@ -139,6 +154,7 @@ def parse_release(title: str) -> ParsedRelease:
     # "Issue(s)": "Vol 1 through 5" stays volumes.
     text = re.sub(r"(?i)\bissues?\s+(\d{1,4})\s+(?:through|thru)\s+(\d{1,4})\b", r"\1-\2", text)
     text = re.sub(r"(?<![\d/])1/2(?![\d/])", "½", text)  # "Batman 1/2" is issue ½
+    text = re.sub(r"(?i)\s*\bgetcomics\.info\b", " ", text)  # GetComics' own tag on its packs
     lowered = text.lower()
 
     # MyAnonamouse: "... by Author, Publisher [ENG / CBZ] [VIP]" -> formats, language, drop authors.
@@ -275,7 +291,11 @@ def parse_release(title: str) -> ParsedRelease:
         r.volume = r.volume or vm2.group(1)
         series = series[: vm2.start()].strip()
     series = re.sub(r"\s+(?:19|20)\d{2}\s*-\s*(?:19|20)\d{2}$", "", series)  # trailing year span
-    if (ym := re.search(r"\s((?:19|20)\d{2})$", series)) and _plausible_year(ym.group(1)):
+    if (
+        (ym := re.search(r"\s((?:19|20)\d{2})$", series))
+        and _plausible_year(ym.group(1))
+        and not re.search(r"(?i)\b(annual|special)\s+\d{4}$", series)  # "X Annual 2026" names a series
+    ):
         # "Dark Phoenix Saga 2025" -> year (but "Spider-Man 2099" keeps its number)
         r.year = r.year or int(ym.group(1))
         series = series[: ym.start()].strip()
@@ -284,6 +304,9 @@ def parse_release(title: str) -> ParsedRelease:
     if r.kind in ("volume", "volumes"):
         series = re.sub(r"\s+tpbs?$", "", series, flags=re.I)  # "The Walking Dead TPBs v.01-29"
     r.series = series
+    # Scene names "Writer Name-Title.017": the title alone is a second reading of the series.
+    if " " not in raw and (am := re.match(r"^((?:[A-Z][a-z]+ ){1,2}[A-Z][a-z]+)-(\S.*)$", series)):
+        r.alt_series = am.group(2)
     return r
 
 
@@ -301,7 +324,7 @@ def matches_issue(
     profile's business (search.evaluate), not matching's."""
     if strict and rel.ebook:
         return False
-    if rel.series_key not in {series_key(n) for n in series_names if n}:
+    if not rel.series_keys & {series_key(n) for n in series_names if n}:
         return False
     want = normalize_number(number)
     if rel.kind == "issue":
@@ -329,7 +352,7 @@ def matches_volume(rel: ParsedRelease, series_names: list[str], number: str, str
         return False
     names = {series_key(n) for n in series_names if n}
     names |= {series_key(re.sub(r"\s+(tpbs?|hc|omnibus)$", "", n, flags=re.I)) for n in series_names if n}
-    if rel.series_key not in names:
+    if not rel.series_keys & names:
         return False
     want = normalize_number(number)
     if rel.kind == "volume":
@@ -351,7 +374,7 @@ def matches_single_volume(rel: ParsedRelease, series_names: list[str], years: tu
     match (a same-name book from another decade) always fails."""
     if rel.kind != "unknown" or rel.ebook:
         return False
-    if rel.series_key not in {series_key(n) for n in series_names if n}:
+    if not rel.series_keys & {series_key(n) for n in series_names if n}:
         return False
     known = [y for y in years if y]
     year_ok = bool(rel.year and known and any(abs(rel.year - y) <= 1 for y in known))

@@ -69,7 +69,8 @@ def make_rss_handler(transport=None):
                         by_key[series_key(n)].add(i.series_id)
             pools: dict[int, list[dict]] = defaultdict(list)
             for r in new:
-                for sid in by_key.get(parse_release(r.get("title") or "").series_key, ()):
+                sids = {s for k in parse_release(r.get("title") or "").series_keys for s in by_key.get(k, ())}
+                for sid in sids:
                     pools[sid].append(r)
             profile = load_profile(db)
             grabbed = held = errors = 0

@@ -339,7 +339,7 @@ def _file_number(f: Path, series: Series, confident: bool = False) -> str | None
     otherwise the first number in the name, as for matching files in a pack."""
     rel = parse_release(f.name)
     names = {series_key(n) for n in (series.name, series.mylar_name) if n}
-    if rel.number is None or (rel.series and series_key(rel.series) not in names):
+    if rel.number is None or (rel.series and not rel.series_keys & names):
         if confident:
             return None
         num = parse_issue_number(f.name, series.name) or parse_issue_number(f.name, series.mylar_name)
