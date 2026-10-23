@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Blocklist · Fumora{% endblock %}
+{% block content %}
+<h1>Blocklist</h1>
+<p><a href="/queue">Queue</a> · <a href="/history">History</a></p>
+<p class="muted">Releases Fumora never grabs again: failed downloads, and ones you rejected or retried.
+Remove one to let searches pick it again.</p>
+{% if rows %}
+<table>
+  <thead><tr><th>Added (UTC)</th><th>Release</th><th>Series</th><th>Why</th><th></th></tr></thead>
+  <tbody>
+  {% for b in rows %}
+    <tr>
+      <td>{{ b.created.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td>{{ b.title }}</td>
+      <td>{% if b.series_id and b.series_id in names.series %}<a href="/series/{{ b.series_id }}">{{ names.series[b.series_id] }}</a>{% endif %}{% if b.issue_id and b.issue_id in names.issues %} <a href="/issues/{{ b.issue_id }}">#{{ names.issues[b.issue_id] }}</a>{% endif %}</td>
+      <td class="small">{{ b.reason }}</td>
+      <td><form method="post" action="/blocklist/{{ b.id }}/remove"><button class="secondary">Remove</button></form></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<form method="post" action="/blocklist/clear"><button class="secondary">Clear all {{ rows|length }}</button></form>
+{% else %}
+<p class="muted">Empty.</p>
+{% endif %}
+{% endblock %}

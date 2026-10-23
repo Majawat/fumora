@@ -32,9 +32,11 @@ Jinja2 + htmx. Image: `ghcr.io/majawat/fumora:edge` (built from `main`).
 | M5b other sources: ComicVine refresh, move to Metron, add from ComicVine, reading direction, Metron gaps page | merged 2026-10-20 | #28 |
 | M5c: full tags at import (#24: Metron or ComicVine issue record first), Import files page (manual import), permissions, version 0.5.0 | merged 2026-10-21, tagged v0.5.0 | #29 |
 | 0.5.1: fixes from the full Gemini audit of v0.5.0 (41 real findings) + verification pass | merged 2026-10-22, tagged v0.5.1 | #30 |
-| 0.5.2: parser packs of volumes / year volumes / variants (#16), downloads converted straight into the library (#31), live Shelfmark test fixes (#7) | open | #33 |
-| M5 rest: TPB fallback (TPB = own series; grab only when single issues aren't available), GCD ratings via the GCD API (needs the owner's GCD account), manual series, split/join, notifications (back burner) | not started | — |
-| M6 side-by-side week with Mylar, cut over | not started | — |
+| 0.5.2: parser packs of volumes / year volumes / variants (#16), downloads converted straight into the library (#31), live Shelfmark test fixes (#7) | merged 2026-10-23, tagged v0.5.2 | #33 |
+| 0.6.0 Sonarr/Mylar parity: delete series + optional recycle folder, History, Blocklist, database backups/restore, RSS sync, annuals linked to their series, story arcs as reading lists (.cbl) + release-name parser rules (live workflow, Mylar comparison, local-model labelling) | merged 2026-10-23, tagged v0.6.0 | #34 |
+| M5 rest: TPBs (a TPB is its own series, grabbed only when that series is added and monitored; never counts as the single issues it collects), GCD ratings via the GCD API (needs the owner's GCD account), manual series, split/join, notifications (back burner) | not started | — |
+| M6 side-by-side week with Mylar, cut over (1.0.0) | not started | — |
+| Back burner (owner, 2026-10-23): bulk series editor, quality upgrades (scan -> digital), API with a key (e.g. for Requinsta), Logs page, notifications, ISBN search for TPBs | — | — |
 
 ### Where M4 part 2 stands
 
@@ -208,6 +210,28 @@ downloads, metadata, web/security, structure, tests) in `.audit/` of a plain `gi
 SUCCESS even then. First audit (v0.5.0, 2026-10-21): 61 findings: 41 real (fixed in 0.5.1 with tests that
 fail on v0.5.0, `tests/test_audit_v050.py`), 7 duplicates, 13 wrong (mostly the tests pass claiming
 existing tests don't exist; its findings need the most checking).
+
+## Sonarr/Mylar parity (0.6.0)
+
+- **Delete series** (`series_delete.py`, series page → Delete this series…): the record always, files only
+  when ticked. The folder goes whole only when it is the series' own (never the library root, an import /
+  recycle / download folder, anything above them, or one another series uses). Refused while a download or
+  a job touching the series runs. Files first; a failure leaves the database untouched.
+- **Recycle folder optional** (`library.recycle` on/off, `recycle.py`): off deletes replaced originals and
+  deleted files for good. Every caller goes through `recycle_dir(db)`.
+- **History** (`/history`, series and issue pages) and **Blocklist** (`/blocklist`: remove one, clear all).
+  Issue events always carry their series (`importer.log`).
+- **Backups** (`backup.py`, `/backups`): SQLite online-backup copies in `/config/backups`, scheduled
+  (`backup.interval_days`, `backup.keep`) or by hand; download, upload, restore. A restore is staged
+  (`restore-pending.db`) and applied at the next start, before migrations, after backing up the current one.
+- **RSS sync** (`rss.py`, job `rss`, `search.rss_minutes`): Prowlarr's newest comics releases (a search with
+  no query: 100 per indexer) matched against Wanted issues, same rules as the Wanted search
+  (`auto_search.searchable_wanted` / `send_best`). Each release once (`state.rss.seen`).
+- **Annuals** (`annuals.py`, `Series.parent_id`): linked from Mylar, guessed (base name, run going when the
+  annual began, publisher), offered on Add series (Metron `associated`, usually empty, else a name search),
+  or set by hand; they share the parent's folder.
+- **Story arcs** (`arcs.py`, `/arcs`): Metron arcs in reading order, matched to issues by Metron id at view
+  time; monitor, add missing series (arc issues only), `.cbl` export for Komga/Kavita.
 
 ## Version numbers
 

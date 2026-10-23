@@ -73,7 +73,7 @@ def folder_problems(db: Session, config_dir: Path) -> list[str]:
                 "will fail. Mount /data read-write when you're ready for Fumora to change files."
             )
     recycle = settings_store.get(db, "library.recycle_path")
-    if recycle:
+    if recycle and (settings_store.get(db, "library.recycle") or "on") != "off":
         existing = recycle
         while existing and not os.path.exists(existing):
             existing = os.path.dirname(existing)

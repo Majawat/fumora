@@ -64,8 +64,19 @@ SETTINGS: list[SettingDef] = [
         "Recycle folder",
         "Library",
         default="/data/media/fumora-recycle",
-        help="Originals Fumora replaces (e.g. a CBR after converting it to CBZ) are moved here, "
-        "never deleted. Keep it outside folders Komga/Kavita/BookOrbit watch.",
+        help="Originals Fumora replaces (e.g. a CBR after converting it to CBZ) and deleted series "
+        "folders are moved here. Keep it outside folders Komga/Kavita/BookOrbit watch.",
+    ),
+    SettingDef(
+        "library.recycle",
+        "Use the recycle folder",
+        "Library",
+        default="on",
+        choices=(
+            ("on", "on: replaced and deleted files go to the recycle folder"),
+            ("off", "off: delete them for good"),
+        ),
+        help="Off: a converted CBR's original and a deleted series' files are gone, not recoverable.",
     ),
     SettingDef(
         "mylar.db_path",
@@ -210,6 +221,18 @@ SETTINGS += [
                help="Give a digital release time to appear before settling for something else."),
     SettingDef("search.retry_failed", "When a download fails", "Search", default="on",
                choices=(("on", "search again for that issue (up to 5 times a day)"), ("off", "do nothing"))),
+    SettingDef("search.rss_minutes", "RSS sync", "Search", default="30", allow_empty=True,
+               choices=(("15", "every 15 minutes"), ("30", "every 30 minutes"), ("60", "every hour"),
+                        ("", "off")),
+               help="Checks Prowlarr's newest comics releases for Wanted issues (one request per indexer). "
+               "Needs automatic search on; the regular Wanted search still runs."),
+    SettingDef("backup.interval_days", "Back up the database every", "Backups", default="7", allow_empty=True,
+               choices=(("1", "day"), ("3", "3 days"), ("7", "week"), ("14", "2 weeks"),
+                        ("", "never (by hand only)")),
+               help="Into /config/backups. The database holds your settings, API keys included."),
+    SettingDef("backup.keep", "Scheduled backups to keep", "Backups", default="5",
+               choices=(("3", "3"), ("5", "5"), ("10", "10"), ("30", "30")),
+               help="Older scheduled ones are deleted; backups made by hand stay until you delete them."),
     SettingDef("import.roots", "Folders you can import files from", "Search", default="/data",
                help="Comma-separated. The Import files page only reads and moves files under these."),
     SettingDef("import.tag", "Tag usenet and direct-download imports", "Search", default="on",

@@ -35,6 +35,7 @@ from .jobs import JobContext
 from .library_jobs import naming_settings
 from .models import File, Issue, Series
 from .numbers import normalize_number
+from .recycle import recycle_dir
 from .releases import parse_release, series_key
 from .tagging import tag_file
 
@@ -355,8 +356,7 @@ def _import_one(sf, path: str, issue_id: int, keep: bool, tag_on: bool) -> str |
                 row, problem = None, str(exc)
             if row is not None:
                 if series.writable and tag_on:
-                    recycle = settings_store.get(db, "library.recycle_path") or "/data/media/fumora-recycle"
-                    tag_file(issue, row, dry_run=False, recycle_dir=recycle)
+                    tag_file(issue, row, dry_run=False, recycle_dir=recycle_dir(db))
                 log(
                     db,
                     f"Imported {src.name} as {series.name} #{issue.number}",

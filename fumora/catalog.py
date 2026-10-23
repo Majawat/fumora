@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import monitoring, naming, settings_store
+from . import annuals, monitoring, naming, settings_store
 from .importer import apply_metron_series, log, sync_series_issues
 from .metron import MetronClient
 from .models import Series
@@ -23,12 +23,19 @@ def folder_for(db: Session, series: Series) -> str:
 
 
 async def add_series(
-    db: Session, client: MetronClient, metron_id: int, option: str = "future", monitor_new: bool = True
+    db: Session,
+    client: MetronClient,
+    metron_id: int,
+    option: str = "future",
+    monitor_new: bool = True,
+    parent: Series | None = None,
 ) -> Series:
     """Create a series from Metron, list its issues, set monitoring, link files
     if its folder already exists. Creates no folders and touches no files."""
     existing = db.scalar(select(Series).where(Series.metron_id == metron_id))
     if existing is not None:
+        if parent is not None and existing.parent_id is None and existing.id != parent.id:
+            annuals.link(existing, parent)
         return existing
     detail = await client.series(metron_id)
     series = Series(
@@ -44,6 +51,10 @@ async def add_series(
     db.add(series)
     apply_metron_series(db, series, detail)
     series.path = folder_for(db, series)
+    # An annual belongs to its main series and lives in its folder (as in Mylar).
+    parent = parent or annuals.guess_parent(db, series)
+    if parent is not None:
+        annuals.link(series, parent)
     db.flush()
     await sync_series_issues(db, client, series)
     if os.path.isdir(series.path):

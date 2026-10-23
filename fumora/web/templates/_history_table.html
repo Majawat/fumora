@@ -1,0 +1,17 @@
+{% if events %}
+<table class="log">
+  <thead><tr><th>Time (UTC)</th><th>What</th>{% if show_series %}<th>Series</th>{% endif %}<th>Event</th></tr></thead>
+  <tbody>
+  {% for e in events %}
+    <tr class="{{ e.level }}">
+      <td>{{ e.ts.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td class="small">{{ e.kind }}</td>
+      {% if show_series %}<td>{% if e.series_id and e.series_id in names.series %}<a href="/series/{{ e.series_id }}">{{ names.series[e.series_id] }}</a>{% endif %}{% if e.issue_id and e.issue_id in names.issues %} <a href="/issues/{{ e.issue_id }}">#{{ names.issues[e.issue_id] }}</a>{% endif %}</td>{% endif %}
+      <td>{{ e.message }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">Nothing yet.</p>
+{% endif %}

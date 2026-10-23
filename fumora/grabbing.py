@@ -37,11 +37,12 @@ from .library_jobs import naming_settings
 from .models import Blocklist, File, Grab, Issue, Series
 from .numbers import normalize_number
 from .perms import normalize
+from .recycle import recycle_dir
 from .releases import parse_release, series_key
 from .scanner import COMIC_EXTS, parse_issue_number
 from .search import Candidate
 from .shelfmark import ShelfmarkClient
-from .tagging import DEFAULT_RECYCLE, tag_file
+from .tagging import tag_file
 
 logger = logging.getLogger("fumora.grabbing")
 ACTIVE = ("queued", "downloading", "importing")
@@ -100,7 +101,20 @@ def blocklist(db: Session, grab: Grab, reason: str) -> None:
         )
     )
     if exists is None:
-        db.add(Blocklist(guid=grab.guid, title=grab.release_title, reason=(reason or "")[:500]))
+        db.add(
+            Blocklist(
+                guid=grab.guid,
+                title=grab.release_title,
+                reason=(reason or "")[:500],
+                issue_id=grab.issue_id,
+                series_id=grab.series_id
+                or (
+                    db.scalar(select(Issue.series_id).where(Issue.id == grab.issue_id))
+                    if grab.issue_id
+                    else None
+                ),
+            )
+        )
 
 
 def covered_issues(c: Candidate, issue: Issue) -> list[int]:
@@ -276,9 +290,9 @@ def place_issue_file(
         placed = src
     elif in_place:
         # Already in the library at its own name: converted where it is, and the
-        # original goes to the recycle folder (never deleted, never overwritten).
-        recycle = settings_store.get(db, "library.recycle_path") or DEFAULT_RECYCLE
-        placed = convert.convert_to_cbz(src, recycle)
+        # original goes to the recycle folder (never overwritten; deleted only if the
+        # owner turned the recycle folder off).
+        placed = convert.convert_to_cbz(src, recycle_dir(db))
     elif convert.needs_conversion(src):
         placed = _place_converted(src, dest)
         if not keep_original:
@@ -325,7 +339,7 @@ def _file_number(f: Path, series: Series, confident: bool = False) -> str | None
     otherwise the first number in the name, as for matching files in a pack."""
     rel = parse_release(f.name)
     names = {series_key(n) for n in (series.name, series.mylar_name) if n}
-    if rel.number is None or (rel.series and series_key(rel.series) not in names):
+    if rel.number is None or (rel.series and not rel.series_keys & names):
         if confident:
             return None
         num = parse_issue_number(f.name, series.name) or parse_issue_number(f.name, series.mylar_name)
@@ -360,7 +374,7 @@ def import_grab(db: Session, g: Grab, path: str) -> str:
         raise ImportFailed(f"No comic files found in {path}")
 
     opts = naming_settings(db)
-    recycle = settings_store.get(db, "library.recycle_path") or "/data/media/fumora-recycle"
+    recycle = recycle_dir(db)
     tags_on = tags_on_import(db, g.protocol)
     imported, skipped = [], []
     for f in files:
@@ -411,7 +425,14 @@ def _import_in_thread(session_factory, grab_id: int, path: str) -> None:
             db.rollback()
             g = db.get(Grab, grab_id)
             g.state, g.message = "import_failed", str(exc)[:500]
-            log(db, f"Import failed for '{g.release_title}': {exc}", kind="import", level="error")
+            log(
+                db,
+                f"Import failed for '{g.release_title}': {exc}",
+                kind="import",
+                level="error",
+                issue_id=g.issue_id,
+                series_id=g.series_id,
+            )
         g.finished = datetime.now(UTC)
         db.commit()
 
@@ -521,7 +542,12 @@ async def check_downloads(session_factory, on_failed=None, before_import=None) -
                         client.forget(g.client_job_id)
                     retry += retry_candidates(db, g)
                     log(
-                        db, f"Download failed: '{g.release_title}' ({st.message})", kind="grab", level="error"
+                        db,
+                        f"Download failed: '{g.release_title}' ({st.message})",
+                        kind="grab",
+                        level="error",
+                        issue_id=g.issue_id,
+                        series_id=g.series_id,
                     )
                     db.commit()
                     changed += 1

@@ -82,6 +82,9 @@ def test_add_form_folder_preview_uses_publisher(logged_in, app):
         db.commit()
     with respx.mock:
         respx.get(f"{BASE_URL}series/500/").respond(200, json=SERIES_DETAIL)
+        respx.get(f"{BASE_URL}series/").respond(
+            200, json={"count": 0, "next": None, "results": []}
+        )  # annuals
         page_html = logged_in.get("/add/500").text
     assert "Pub/Monthly (2025)" in page_html.replace("&#x2F;", "/")
     with app.state.session_factory() as db:

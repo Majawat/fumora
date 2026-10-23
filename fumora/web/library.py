@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, selectinload
 
-from .. import naming, settings_store
+from .. import annuals, naming, settings_store
 from ..import_job import KIND as MYLAR_IMPORT
 from ..importer import (
     apply_metron_series,
@@ -22,7 +22,10 @@ from ..library_jobs import ORGANIZE, RETAG, SCAN, naming_settings, shared_folder
 from ..metron import MetronError
 from ..models import File, Issue, Series, Tag
 from ..ratings import METRON_RATINGS, series_rating, strictest
+from ..recycle import recycle_dir
+from ..series_delete import DeleteFailed, delete_series, plan_delete
 from ..sources import CHECK_NOTE, CV_REFRESH, accept_suggestion, reject_metron_match
+from .activity_routes import recent_history
 
 MATCH_LABELS = {
     "matched": "Matched",
@@ -100,6 +103,9 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
             "tag_names": ", ".join(sorted(t.name for t in series.tags)),
             "plan": plan,
             "writable": series.writable,
+            "history": recent_history(db, 25, series_id=series.id),
+            "children": sorted(series.children, key=lambda c: (c.year_began or 0, c.name)),
+            "parent_options": annuals.parent_candidates(db, series)[:30] if not series.children else [],
         }
 
     @app.get("/series/{series_id}", response_class=HTMLResponse)
@@ -167,6 +173,53 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
         series.tags = new_tags
         db.commit()
         return RedirectResponse(f"/series/{series_id}", status_code=303)
+
+    @app.post("/series/{series_id}/parent")
+    def series_parent(series_id: int, parent_id: str = Form(""), db: Session = Depends(get_db)):
+        series = _get_series(db, series_id)
+        parent = _get_series(db, int(parent_id)) if parent_id.strip().isdigit() else None
+        try:
+            annuals.link(series, parent)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        log(
+            db,
+            f"'{series.name}' now belongs to '{parent.name}'"
+            if parent
+            else f"'{series.name}' belongs to no series",
+            kind="series",
+            series_id=series.id,
+        )
+        db.commit()
+        return RedirectResponse(f"/series/{series_id}", status_code=303)
+
+    @app.get("/series/{series_id}/delete", response_class=HTMLResponse)
+    def series_delete_page(request: Request, series_id: int, db: Session = Depends(get_db)):
+        series = _get_series(db, series_id)
+        return templates.TemplateResponse(
+            request,
+            "series_delete.html",
+            {"s": series, "plan": plan_delete(db, series), "recycle": recycle_dir(db), "error": None},
+        )
+
+    @app.post("/series/{series_id}/delete", response_class=HTMLResponse)
+    def series_delete(
+        request: Request, series_id: int, delete_files: bool = Form(False), db: Session = Depends(get_db)
+    ):
+        series = _get_series(db, series_id)
+        recycle = recycle_dir(db)
+        try:
+            delete_series(db, series, delete_files, recycle)
+        except DeleteFailed as exc:
+            db.rollback()
+            series = _get_series(db, series_id)
+            return templates.TemplateResponse(
+                request,
+                "series_delete.html",
+                {"s": series, "plan": plan_delete(db, series), "recycle": recycle, "error": str(exc)},
+                status_code=409,
+            )
+        return RedirectResponse("/series", status_code=303)
 
     def _start(kind: str, params: dict) -> None:
         active = app.state.jobs.active(kind)

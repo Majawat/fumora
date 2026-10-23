@@ -8,7 +8,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from . import settings_store
+from . import annuals, settings_store
 from .importer import (
     import_report,
     log,
@@ -58,6 +58,9 @@ def make_handler(config_dir: Path, make_client: Callable[[str, str], MetronClien
             mylar_series = read_mylar(snap)
             with sf() as db:
                 stats = upsert_mylar(db, mylar_series)
+                linked = annuals.link_unlinked(db)  # annuals Mylar kept as series of their own
+                if linked:
+                    log(db, f"Linked {linked} annuals/specials to their main series", kind="import")
                 log(
                     db,
                     f"Read Mylar: {stats.series_seen} series ({stats.series_new} new), "

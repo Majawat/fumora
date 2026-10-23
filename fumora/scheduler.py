@@ -3,17 +3,20 @@
 import asyncio
 import logging
 import random
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
-from . import settings_store
+from . import backup, settings_store
 from .auto_search import SEARCH
 from .grabbing import check_downloads
 from .models import Event, Setting
 from .refresh import REFRESH
+from .rss import RSS
 from .sources import CV_REFRESH
 
 log = logging.getLogger("fumora.scheduler")
 CHECK_EVERY = 300  # seconds
+BACKUP_RETRY = timedelta(hours=1)  # after a failed scheduled backup
 
 
 _FIRST_PICK = {
@@ -54,6 +57,39 @@ def due(now: datetime, at: str | None, last_run_day: str | None) -> bool:
     if last_run_day == now.date().isoformat():
         return False
     return (now.hour, now.minute) >= (hour, minute)
+
+
+def backup_due(now: datetime, every_days: str | None, last: str | None) -> bool:
+    try:
+        days = float(every_days) if every_days else 0
+    except ValueError:
+        return False
+    if days <= 0:
+        return False
+    return not last or (now - datetime.fromisoformat(last)).total_seconds() >= days * 86400
+
+
+async def scheduled_backup(db, now: datetime) -> None:
+    """Back up the live database into /config/backups and drop old scheduled ones."""
+    path = Path(db.get_bind().url.database)
+    folder = backup.backup_dir(path.parent)
+    made = await asyncio.to_thread(backup.make_backup, path, folder, "scheduled")
+    keep = int(settings_store.get(db, "backup.keep") or 5)
+    gone = await asyncio.to_thread(backup.prune, folder, keep)
+    settings_store.put_state(db, "schedule.backup.last", now.isoformat())
+    db.add(Event(kind="backup", message=f"Backed up the database: {made.name}"
+                 + (f" (removed {len(gone)} old)" if gone else "")))  # fmt: skip
+    db.commit()
+
+
+def rss_due(now: datetime, auto: str | None, every_minutes: str | None, last: str | None) -> bool:
+    if auto != "on" or not every_minutes:
+        return False
+    try:
+        minutes = max(5.0, float(every_minutes))
+    except ValueError:
+        return False
+    return not last or (now - datetime.fromisoformat(last)).total_seconds() >= minutes * 60
 
 
 def search_due(now: datetime, enabled: str | None, every_hours: str | None, last: str | None) -> bool:
@@ -128,6 +164,36 @@ async def run_scheduler(session_factory, jobs, check_every: int = CHECK_EVERY) -
                     db.commit()
                     jobs.start(CV_REFRESH, {})
                     log.info("scheduled ComicVine refresh started")
+                failed = settings_store.get_state(db, "schedule.backup.failed")
+                if backup_due(
+                    now,
+                    settings_store.get(db, "backup.interval_days"),
+                    settings_store.get_state(db, "schedule.backup.last"),
+                ) and not (failed and now - datetime.fromisoformat(failed) < BACKUP_RETRY):
+                    try:
+                        await scheduled_backup(db, now)
+                        settings_store.put_state(db, "schedule.backup.failed", None)
+                        db.commit()
+                    except Exception as exc:  # said out loud, tried again an hour later
+                        db.rollback()
+                        settings_store.put_state(db, "schedule.backup.failed", now.isoformat())
+                        db.add(Event(kind="backup", level="error", message=f"Scheduled backup failed: {exc}"))
+                        db.commit()
+                        log.exception("scheduled backup failed")
+                if (
+                    rss_due(
+                        now,
+                        settings_store.get(db, "search.auto"),
+                        settings_store.get(db, "search.rss_minutes"),
+                        settings_store.get_state(db, "schedule.rss.last"),
+                    )
+                    and settings_store.is_set(db, "prowlarr.api_key")
+                    and jobs.active(RSS) is None
+                    and jobs.active(SEARCH) is None  # the search grabs for the same issues
+                ):
+                    settings_store.put_state(db, "schedule.rss.last", now.isoformat())
+                    db.commit()
+                    jobs.start(RSS, {})
                 last_search = settings_store.get_state(db, "schedule.search.last")
                 if (
                     search_due(

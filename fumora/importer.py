@@ -119,6 +119,15 @@ def upsert_mylar(
                 else:
                     stats.files_missing += 1
     db.flush()
+    # Mylar's annuals belong to their series: keep that link (unless set by hand since).
+    for ms in mylar_series:
+        if ms.parent_cv_id is None:
+            continue
+        annual = db.scalar(select(Series).where(Series.cv_id == ms.cv_id))
+        parent = db.scalar(select(Series).where(Series.cv_id == ms.parent_cv_id))
+        if annual is not None and parent is not None and annual.parent_id is None and annual.id != parent.id:
+            annual.parent_id = parent.id
+    db.flush()
     return stats
 
 
@@ -464,6 +473,9 @@ def import_report(db: Session) -> dict:
 
 
 def log(db: Session, message: str, kind: str = "import", level: str = "info", **ids) -> None:
+    if ids.get("issue_id") and not ids.get("series_id"):
+        # Every issue event is also its series' (the series page's History).
+        ids["series_id"] = db.scalar(select(Issue.series_id).where(Issue.id == ids["issue_id"]))
     db.add(Event(kind=kind, level=level, message=message, **ids))
 
 

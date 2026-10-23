@@ -94,6 +94,9 @@ class Series(Base):
     year_end: Mapped[int | None]
     # Metron series_type name: Single Issue, Trade Paperback, Annual, ...
     series_type: Mapped[str | None] = mapped_column(String(50))
+    # An annual or special belongs to its main series (Mylar folds them in; on Metron and
+    # ComicVine they are series of their own). See annuals.py.
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("series.id", ondelete="SET NULL"), index=True)
     status: Mapped[str | None] = mapped_column(String(50))
     desc: Mapped[str | None] = mapped_column(Text)
     genres: Mapped[list | None] = mapped_column(JSON)
@@ -168,6 +171,8 @@ class Series(Base):
 
     issues: Mapped[list["Issue"]] = relationship(back_populates="series", cascade="all, delete-orphan")
     tags: Mapped[list[Tag]] = relationship(secondary=series_tag)
+    parent: Mapped["Series | None"] = relationship(remote_side=[id], back_populates="children")
+    children: Mapped[list["Series"]] = relationship(back_populates="parent", passive_deletes=True)
 
 
 class Issue(Base):
@@ -285,6 +290,8 @@ class Blocklist(Base):
     title: Mapped[str] = mapped_column(String(500))
     reason: Mapped[str | None] = mapped_column(String(500))
     created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    series_id: Mapped[int | None] = mapped_column(ForeignKey("series.id", ondelete="SET NULL"))
+    issue_id: Mapped[int | None] = mapped_column(ForeignKey("issue.id", ondelete="SET NULL"))
 
 
 class Event(Base):
@@ -297,8 +304,8 @@ class Event(Base):
     level: Mapped[str] = mapped_column(String(10), default="info")
     kind: Mapped[str] = mapped_column(String(50))
     message: Mapped[str] = mapped_column(Text)
-    series_id: Mapped[int | None] = mapped_column(ForeignKey("series.id", ondelete="SET NULL"))
-    issue_id: Mapped[int | None] = mapped_column(ForeignKey("issue.id", ondelete="SET NULL"))
+    series_id: Mapped[int | None] = mapped_column(ForeignKey("series.id", ondelete="SET NULL"), index=True)
+    issue_id: Mapped[int | None] = mapped_column(ForeignKey("issue.id", ondelete="SET NULL"), index=True)
 
 
 class Job(Base):
@@ -335,6 +342,44 @@ class Release(Base):
     cover_date: Mapped[date | None] = mapped_column(Date)
     image: Mapped[str | None] = mapped_column(String(500))
     fetched: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class StoryArc(Base):
+    """A Metron story arc followed as a reading list (Mylar's Story Arcs)."""
+
+    __tablename__ = "story_arc"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    metron_id: Mapped[int] = mapped_column(unique=True)
+    name: Mapped[str] = mapped_column(String(255))
+    desc: Mapped[str | None] = mapped_column(Text)
+    cv_id: Mapped[int | None]
+    synced: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    added: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    entries: Mapped[list["StoryArcEntry"]] = relationship(
+        back_populates="arc", cascade="all, delete-orphan", order_by="StoryArcEntry.position"
+    )
+
+
+class StoryArcEntry(Base):
+    """One issue of an arc, in reading order. Matched to Fumora's issues by metron id
+    when shown, so it picks up series added later."""
+
+    __tablename__ = "story_arc_entry"
+    __table_args__ = (UniqueConstraint("arc_id", "metron_issue_id", name="uq_arc_entry_issue"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    arc_id: Mapped[int] = mapped_column(ForeignKey("story_arc.id", ondelete="CASCADE"), index=True)
+    position: Mapped[int]
+    metron_issue_id: Mapped[int] = mapped_column(index=True)
+    metron_series_id: Mapped[int | None]
+    series_name: Mapped[str] = mapped_column(String(255))
+    series_year: Mapped[int | None]
+    volume: Mapped[int | None]
+    number: Mapped[str] = mapped_column(String(20))
+    cover_date: Mapped[date | None] = mapped_column(Date)
+    store_date: Mapped[date | None] = mapped_column(Date)
+    arc: Mapped[StoryArc] = relationship(back_populates="entries")
 
 
 class Setting(Base):

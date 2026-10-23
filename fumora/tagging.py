@@ -4,6 +4,7 @@ import html
 import re
 import xml.etree.ElementTree as ET
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 
@@ -13,8 +14,7 @@ from .comicvine import ComicVineClient
 from .metron import MetronClient
 from .models import File, Issue, Series
 from .ratings import TO_COMICINFO, issue_rating
-
-DEFAULT_RECYCLE = "/data/media/fumora-recycle"
+from .recycle import DEFAULT_RECYCLE
 
 
 class NotWritable(Exception):
@@ -233,10 +233,12 @@ def plan_file(issue: Issue, file: File) -> tuple[dict[str, bytes], dict[str, tup
     return files, meaningful
 
 
-def tag_file(issue: Issue, file: File, dry_run: bool, recycle_dir: str = DEFAULT_RECYCLE) -> dict:
+def tag_file(
+    issue: Issue, file: File, dry_run: bool, recycle_dir: str | Path | None = DEFAULT_RECYCLE
+) -> dict:
     """Preview (dry run) or write one file. Returns what is stored in file.tag_preview.
 
-    CBR/CB7/CBT files are converted to CBZ first (originals go to the recycle folder).
+    CBR/CB7/CBT files are converted to CBZ first (originals go to the recycle folder; None deletes them).
     """
     try:
         if not dry_run:
