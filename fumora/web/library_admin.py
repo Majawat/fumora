@@ -8,6 +8,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from ..arcs import arcs_of
 from ..importer import log
 from ..library_jobs import RETAG, SCAN
 from ..models import File, Issue, Series, Tag
@@ -132,6 +133,7 @@ def register_admin_routes(app: FastAPI, templates: Jinja2Templates, get_db) -> N
                 "tag_names": ", ".join(sorted(t.name for t in issue.tags)),
                 "series_tags": ", ".join(sorted(t.name for t in issue.series.tags)),
                 "history": recent_history(db, 50, issue_id=issue.id),
+                "arcs": arcs_of(db, issue),
             },
         )
 

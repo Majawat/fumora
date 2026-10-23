@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Story arcs · Fumora{% endblock %}
+{% block content %}
+<h1>Story arcs</h1>
+<p class="muted">Metron's story arcs as reading lists: issues in reading order across series, what you have,
+monitor the rest, add the series you don't follow, export a reading list for Komga or Kavita.</p>
+<form class="row card" method="get" action="/arcs">
+  <input name="q" value="{{ q }}" placeholder="Search Metron for an arc (e.g. Absolute Power)">
+  <button>Search</button>
+</form>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+{% if q and not error %}
+  {% if results %}
+  <table>
+    <tbody>
+    {% for r in results %}
+      <tr><td>{{ r.name }}</td>
+        <td>{% if r.id in ours %}<a href="/arcs/{{ ours[r.id] }}">Following</a>{% else %}<form method="post" action="/arcs/add/{{ r.id }}"><button class="secondary">Follow</button></form>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">Nothing on Metron called that.</p>{% endif %}
+{% endif %}
+<h2>Following</h2>
+{% if followed %}
+<table>
+  <thead><tr><th>Arc</th><th>Issues</th><th>Updated (UTC)</th></tr></thead>
+  <tbody>
+  {% for a, n in followed %}
+    <tr><td><a href="/arcs/{{ a.id }}">{{ a.name }}</a></td><td>{{ n }}</td><td>{{ a.synced.strftime('%Y-%m-%d') if a.synced else "—" }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted">None yet.</p>{% endif %}
+{% endblock %}

@@ -282,5 +282,14 @@ class MetronClient:
     async def issue(self, metron_id: int) -> dict:
         return await self._get(f"issue/{metron_id}/")
 
+    async def search_arcs(self, name: str, max_pages: int = 1) -> list[dict]:
+        return [a async for a in self._paged("arc/", {"name": name}, max_pages=max_pages)]
+
+    async def arc(self, metron_id: int) -> dict:
+        return await self._get(f"arc/{metron_id}/")
+
+    def arc_issues(self, metron_id: int) -> AsyncIterator[dict]:
+        return self._paged(f"arc/{metron_id}/issue_list/")
+
     def releases_between(self, start: str, end: str) -> AsyncIterator[dict]:
         return self._paged("issue/", {"store_date_range_after": start, "store_date_range_before": end})

@@ -35,6 +35,7 @@
   </label>
   <button>Save</button>
 </form>
+{% if arcs %}<p class="muted">In the story arcs: {% for a in arcs %}<a href="/arcs/{{ a.id }}">{{ a.name }}</a>{{ ", " if not loop.last }}{% endfor %}</p>{% endif %}
 <section class="card">
   <h2>History</h2>
   {% with events=history, show_series=False %}{% include "_history_table.html" %}{% endwith %}

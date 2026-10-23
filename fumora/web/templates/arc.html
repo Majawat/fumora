@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}{{ arc.name }} · Fumora{% endblock %}
+{% block content %}
+<p><a href="/arcs">← Story arcs</a></p>
+<h1>{{ arc.name }}</h1>
+{% if message %}<p class="notice ok">{{ message }}</p>{% endif %}
+<p>{{ sum.total }} issues: {{ sum.have }} in the library, {{ sum.wanted }} wanted, {{ sum.not_followed }} in series you don't follow.
+<span class="muted small">Updated from Metron {{ arc.synced.strftime('%Y-%m-%d %H:%M') if arc.synced else "never" }} UTC.</span></p>
+{% if arc.desc %}<p class="muted">{{ arc.desc[:500] }}{% if arc.desc|length > 500 %}…{% endif %}</p>{% endif %}
+<div class="row">
+  <form method="post" action="/arcs/{{ arc.id }}/monitor"><button>Monitor its issues in series I follow</button></form>
+  <a href="/arcs/{{ arc.id }}/reading-list.cbl">Reading list (.cbl)</a>
+  <form method="post" action="/arcs/{{ arc.id }}/refresh"><button class="secondary">Update from Metron</button></form>
+</div>
+{% if missing %}
+<form class="card" method="post" action="/arcs/{{ arc.id }}/add-series">
+  <h2>Series you don't follow</h2>
+  <p class="muted small">Added from Metron with only this arc's issues monitored.</p>
+  {% for m in missing %}
+  <label class="inline"><input type="checkbox" name="series_ids" value="{{ m.id }}"> {{ m.name }}{% if m.year %} ({{ m.year }}){% endif %} <small class="muted">· {{ m.count }} in the arc</small></label>
+  {% endfor %}
+  <p><button class="secondary">Add the ticked series</button></p>
+</form>
+{% endif %}
+<table>
+  <thead><tr><th>#</th><th>Issue</th><th>Date</th><th>State</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td>{{ r.entry.position }}</td>
+      <td>{% if r.issue %}<a href="/issues/{{ r.issue.id }}">{{ r.issue.series.name }} #{{ r.issue.number }}</a>{% else %}{{ r.entry.series_name }}{% if r.entry.series_year %} ({{ r.entry.series_year }}){% endif %} #{{ r.entry.number }}{% endif %}</td>
+      <td>{{ (r.entry.cover_date or r.entry.store_date or "") }}</td>
+      <td>{{ r.state }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<form method="post" action="/arcs/{{ arc.id }}/delete"><button class="link">Stop following this arc</button></form>
+{% endblock %}

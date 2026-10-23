@@ -344,6 +344,44 @@ class Release(Base):
     fetched: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class StoryArc(Base):
+    """A Metron story arc followed as a reading list (Mylar's Story Arcs)."""
+
+    __tablename__ = "story_arc"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    metron_id: Mapped[int] = mapped_column(unique=True)
+    name: Mapped[str] = mapped_column(String(255))
+    desc: Mapped[str | None] = mapped_column(Text)
+    cv_id: Mapped[int | None]
+    synced: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    added: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    entries: Mapped[list["StoryArcEntry"]] = relationship(
+        back_populates="arc", cascade="all, delete-orphan", order_by="StoryArcEntry.position"
+    )
+
+
+class StoryArcEntry(Base):
+    """One issue of an arc, in reading order. Matched to Fumora's issues by metron id
+    when shown, so it picks up series added later."""
+
+    __tablename__ = "story_arc_entry"
+    __table_args__ = (UniqueConstraint("arc_id", "metron_issue_id", name="uq_arc_entry_issue"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    arc_id: Mapped[int] = mapped_column(ForeignKey("story_arc.id", ondelete="CASCADE"), index=True)
+    position: Mapped[int]
+    metron_issue_id: Mapped[int] = mapped_column(index=True)
+    metron_series_id: Mapped[int | None]
+    series_name: Mapped[str] = mapped_column(String(255))
+    series_year: Mapped[int | None]
+    volume: Mapped[int | None]
+    number: Mapped[str] = mapped_column(String(20))
+    cover_date: Mapped[date | None] = mapped_column(Date)
+    store_date: Mapped[date | None] = mapped_column(Date)
+    arc: Mapped[StoryArc] = relationship(back_populates="entries")
+
+
 class Setting(Base):
     __tablename__ = "setting"
 

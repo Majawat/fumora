@@ -37,6 +37,7 @@ from .scheduler import ensure_refresh_time, run_download_monitor, run_scheduler
 from .shelfmark import ShelfmarkClient, ShelfmarkError
 from .sources import CV_REFRESH, make_cv_refresh_handler
 from .web.activity_routes import register_activity_routes
+from .web.arc_routes import register_arc_routes
 from .web.backup_routes import register_backup_routes
 from .web.catalog_routes import register_catalog_routes
 from .web.import_routes import register_import_routes
@@ -366,6 +367,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     register_search_routes(app, templates, get_db)
     register_import_routes(app, templates, get_db)
     register_activity_routes(app, templates, get_db)
+    register_arc_routes(app, templates, get_db)
     register_backup_routes(app, templates, get_db, config)
 
     @app.get("/api/health")
