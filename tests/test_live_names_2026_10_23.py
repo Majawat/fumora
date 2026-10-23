@@ -83,8 +83,55 @@ def test_issue_number_in_brackets_and_lists_of_volumes():
     r = parse_release("G.I. Joe: A Real American Hero - Saturday Morning Adventures (#01) (2022) (digital)")
     assert (r.kind, r.number) == ("issue", "1")
     r = parse_release("Amazing Spider-Man: Epic Collection Vol. 1,2,5,8,9,15,23,24,25,27 [ENG / CBR]")
-    assert (r.series, r.kind, r.number) == ("Amazing Spider-Man: Epic Collection", "unknown", None)
+    assert (r.series, r.kind, r.number) == ("Amazing Spider-Man: Epic Collection", "list", None)
     assert (
         parse_release("Hellboy in Love  Black Eyes (2026) (digital) Torrent").series
         == "Hellboy in Love Black Eyes"
     )
+
+
+# --- Gemini review of the parser commits in #34 ------------------------------------------------
+
+
+def test_a_match_through_the_second_reading_is_held_for_an_ok():
+    from datetime import date
+
+    from fumora.models import Issue, Series
+    from fumora.search import Profile, evaluate
+
+    def candidate(title, series_name, number, year=2024):
+        s = Series(name=series_name, year_began=2024, series_type="Single Issue")
+        rel = {"title": title, "size": 40 * 2**20, "protocol": "usenet"}
+        return evaluate(rel, Issue(series=s, number=number, cover_date=date(year, 3, 1)), Profile())
+
+    # "Miles Morales" is a character, not a writer: never grabbed by itself for Spider-Man #17.
+    c = candidate("Miles.Morales-Spider-Man.017.2024.Digital.Zone-Empire", "Spider-Man", "17")
+    assert c.identified and not c.accepted and c.holdable and "Spider-Man" in c.hold
+    # The full name still matches the series it really is.
+    assert candidate(
+        "Miles.Morales-Spider-Man.017.2024.Digital.Zone-Empire", "Miles Morales: Spider-Man", "17"
+    ).accepted
+    assert candidate(
+        "Absolute Wonder Woman 017 (2026) (Digital)", "Absolute Wonder Woman", "17", 2026
+    ).accepted
+
+
+def test_by_in_an_issue_title_is_not_a_writer():
+    r = parse_release("Werewolf by Night 001 (2020) (Digital)")
+    assert r.alt_series is None and not matches_issue(r, ["Werewolf"], "1", (2020,))
+
+
+def test_zero_padded_decimal_issues_and_tagged_one_dot_names():
+    assert parse_release("Batman.001.5.2016.Digital.Zone-Empire").number == "1.5"
+    assert not matches_issue(parse_release("Batman.001.5.2016.Digital.Zone-Empire"), ["Batman"], "1", (2016,))
+    r = parse_release("Fairest.18 (2012) (Digital).cbr")
+    assert (r.series, r.kind, r.number) == ("Fairest", "issue", "18")
+
+
+def test_a_list_of_volumes_matches_nothing_but_keeps_its_fields():
+    from fumora.releases import matches_single_volume, matches_volume
+
+    r = parse_release("Marvel – Amazing Spider-Man: Epic Collection Vol. 1,2,5,8 2023 [ENG / CBR]")
+    assert (r.kind, r.year, r.alt_series) == ("list", 2023, "Amazing Spider-Man: Epic Collection")
+    names = ["Amazing Spider-Man: Epic Collection"]
+    assert not matches_single_volume(r, names, (2023,)) and not matches_volume(r, names, "2")

@@ -65,7 +65,7 @@ _ISSUE = re.compile(
 class ParsedRelease:
     title: str
     series: str = ""
-    kind: str = "unknown"  # issue, range (of issues), volume, volumes (a pack of them), unknown
+    kind: str = "unknown"  # issue, range (of issues), volume, volumes (a pack of them), list, unknown
     number: str | None = None  # issue number or volume number (the first, for a pack)
     range_start: int | None = None
     range_end: int | None = None
@@ -130,11 +130,16 @@ def _scene_to_spaces(title: str) -> str:
     # Scene style if a word is dotted and carries a number ("X-Men.001.2024 [Digital-Empire]",
     # whatever the tags around it) or is underscored. Abbreviations ("U.S.A.", "G.I. Joe",
     # "B.P.R.D. 001") and "Mr. Miracle" or "Vol. 2" keep their dots.
+    # A one-dot name ("Fairest.18") counts when it is the whole title but for its tags.
+    core = re.sub(
+        r"[\[(][^\])]*[\])]", " ", re.sub(r"(?i)\.(cbz|cbr|cb7|cbt|zip|rar|pdf)$", "", title)
+    ).strip()
+
     def scene(w: str) -> bool:
         return (
             (w.count(".") >= 2 and any(ch.isdigit() for ch in w))
             or w.count("_") >= 2
-            or (w == title and re.search(r"[A-Za-z]\.\d", w) is not None)  # "Fairest.18"
+            or (w == core and re.search(r"[A-Za-z]\.\d", w) is not None)
         )
 
     if not any(scene(w) for w in title.split()):
@@ -145,7 +150,8 @@ def _scene_to_spaces(title: str) -> str:
     # "Spider-Man.2099.025.2017" is series 2099, issue 025, year 2017.
     out = re.sub(
         r"(\d+)\.(?=(\d+))",
-        lambda m: m.group(1) + (" " if max(len(m.group(1)), len(m.group(2))) >= 3 else "."),
+        # "001.5" (a zero-padded 1.5) keeps its dot; "2099.025" and "025.2017" split.
+        lambda m: m.group(1) + (" " if len(m.group(1)) >= 4 or len(m.group(2)) >= 3 else "."),
         out,
     )
     out = re.sub(r"(?<!\d)\.(?!\d)|\.(?=\D)|(?<=\D)\.", " ", out)
@@ -249,11 +255,8 @@ def parse_release(title: str) -> ParsedRelease:
     # Strip trailing junk words, years, extensions.
     body = re.sub(r"\.(cbz|cbr|cb7|zip|rar|pdf|epub)$", "", body.strip(), flags=re.I)
     body = re.sub(r"\b(ongoing|complete|fcbd|torrent)\b", " ", body, flags=re.I)
-    # "Epic Collection Vol. 1,2,5,8": a list of volumes, not issue #2; left unmatched.
-    if re.search(r"(?i)\bvol(?:ume)?s?\.?\s*\d{1,3}\s*,\s*\d", body):
-        r.kind = "unknown"
-        r.series = re.sub(r"(?i)\s*\bvol(?:ume)?s?\.?\s*\d.*$", "", body).strip(" -_.,")
-        return r
+    # "Epic Collection Vol. 1,2,5,8": a list of volumes, not issue #2. Kind "list": no matcher takes it.
+    vol_list = re.search(r"(?i)\bvol(?:ume)?s?\.?\s*\d{1,3}\s*,\s*\d", body) is not None
 
     # Variant covers in the name ("001 Cover B", "001 Jim Lee Variant", "1 1:25") are the
     # same issue; only flagged. The ratio is no issue number ("Batman 1 1:25" is #1).
@@ -332,6 +335,9 @@ def parse_release(title: str) -> ParsedRelease:
         r.group = dg.group(1)
     if r.kind in ("volume", "volumes"):
         series = re.sub(r"\s+tpbs?$", "", series, flags=re.I)  # "The Walking Dead TPBs v.01-29"
+    if vol_list:
+        r.kind, r.number, r.range_start, r.range_end = "list", None, None, None
+        series = re.sub(r"(?i)\s*\bvol(?:ume)?s?\.?\s*\d.*$", "", series).strip(" -_.,")
     # A collected edition ("(TPB)", "(HC)", "Omnibus") never is a single issue (a TPB is its own series).
     if r.kind == "issue" and any(
         re.fullmatch(r"(?i)(fan-made\s+)?(tpb|hc|hardcover|trade paperback|omnibus|ogn|gn|deluxe edition)", t)
@@ -345,8 +351,10 @@ def parse_release(title: str) -> ParsedRelease:
         r.alt_series = am.group(2)
     elif publisher_prefix and series.startswith(publisher_prefix):
         r.alt_series = re.sub(r"^\s*[-–]\s*", "", series[len(publisher_prefix) :]).strip() or None
-    elif (bm := re.match(r"^(.+?)\s+[Bb]y\s+((?:[A-Z][\w.'’-]*\s*){1,4})$", series)) and not re.search(
-        r"(?i)\b(omnibus|collection|edition|epic|library|compendium)\b", bm.group(2)
+    elif (
+        r.kind in ("volume", "volumes")  # "X by Writer Vol. 6"; "Werewolf by Night 001" is a title
+        and (bm := re.match(r"^(.+?)\s+[Bb]y\s+((?:[A-Z][\w.'’-]*\s*){1,4})$", series))
+        and not re.search(r"(?i)\b(omnibus|collection|edition|epic|library|compendium)\b", bm.group(2))
     ):
         r.alt_series = bm.group(1)  # "Miles Morales – Spider-Man by Cody Ziglar" (Vol. 6)
     return r

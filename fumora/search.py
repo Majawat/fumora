@@ -24,6 +24,7 @@ from .releases import (
     matches_single_volume,
     matches_volume,
     parse_release,
+    series_key,
 )
 
 SOURCE_SCORE = {"digital": 300, "unknown": 200, "upscaled": 150, "scan": 100}
@@ -171,11 +172,17 @@ def evaluate(release: dict, issue: Issue, profile: Profile) -> Candidate:
     else:
         c.identified = True
 
+    holds = []
+    if c.identified and rel.alt_series and series_key(rel.series) not in {series_key(n) for n in names}:
+        # Only the second reading matched ("Miles.Morales-Spider-Man.017" read as "Spider-Man"):
+        # a writer and a character look alike in a name, so the owner decides.
+        holds.append(f"matches only as '{rel.alt_series}' (from '{rel.series}')")
     if c.language not in profile.languages:
         if profile.other_languages == "reject":
             c.rejections.append(f"language: {c.language}")
         else:
-            c.hold = f"language: {c.language}"
+            holds.append(f"language: {c.language}")
+    c.hold = "; ".join(holds) or None
 
     size = c.size_mb
     pack = rel.kind in ("range", "volumes")
