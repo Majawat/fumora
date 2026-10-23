@@ -16,6 +16,7 @@ from .importer import log
 from .jobs import JobContext
 from .metron import MetronAuthError, MetronClient, MetronError, MetronPause, _open
 from .models import Issue, Series
+from .recycle import recycle_dir
 from .scanner import scan_folders
 from .tagging import ensure_cv_detail, ensure_detail, tag_file
 
@@ -70,7 +71,7 @@ def make_retag_handler(
         sf = ctx.session_factory
         with sf() as db:
             user, password, token = settings_store.metron_login(db)
-            recycle = settings_store.get(db, "library.recycle_path")
+            recycle = recycle_dir(db)
             cv_key = settings_store.get(db, "comicvine.api_key")
             q = select(Issue.id).join(Series).where(Issue.files.any()).order_by(Series.id, Issue.sort_number)
             if ids:

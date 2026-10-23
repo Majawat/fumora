@@ -64,8 +64,19 @@ SETTINGS: list[SettingDef] = [
         "Recycle folder",
         "Library",
         default="/data/media/fumora-recycle",
-        help="Originals Fumora replaces (e.g. a CBR after converting it to CBZ) are moved here, "
-        "never deleted. Keep it outside folders Komga/Kavita/BookOrbit watch.",
+        help="Originals Fumora replaces (e.g. a CBR after converting it to CBZ) and deleted series "
+        "folders are moved here. Keep it outside folders Komga/Kavita/BookOrbit watch.",
+    ),
+    SettingDef(
+        "library.recycle",
+        "Use the recycle folder",
+        "Library",
+        default="on",
+        choices=(
+            ("on", "on: replaced and deleted files go to the recycle folder"),
+            ("off", "off: delete them for good"),
+        ),
+        help="Off: a converted CBR's original and a deleted series' files are gone, not recoverable.",
     ),
     SettingDef(
         "mylar.db_path",

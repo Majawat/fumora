@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Delete {{ s.name }} · Fumora{% endblock %}
+{% block content %}
+<p><a href="/series/{{ s.id }}">← {{ s.name }}</a></p>
+<h1>Delete {{ s.name }}{% if s.year_began %} ({{ s.year_began }}){% endif %}?</h1>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+{% if plan.blockers %}
+<section class="card attention">
+  <h2>Not now</h2>
+  <ul>{% for b in plan.blockers %}<li>{{ b }}</li>{% endfor %}</ul>
+</section>
+{% else %}
+<form class="card" method="post" action="/series/{{ s.id }}/delete">
+  <p>Fumora forgets the series and its {{ s.issues|length }} issues (monitoring, matches, tags you set).
+  A Mylar import or <a href="/add">Add series</a> can bring it back.</p>
+  {% if plan.count %}
+  <label><input type="checkbox" name="delete_files" value="true">
+    Also delete its files:
+    {% if plan.folder %}the folder <code>{{ plan.folder }}</code>{% endif %}
+    {% if plan.folder and plan.files %} and {% endif %}
+    {% if plan.files %}{{ plan.files|length }} file{{ "" if plan.files|length == 1 else "s" }}{% endif %}
+    <small>{% if recycle %}They go to the recycle folder <code>{{ recycle }}</code>.{% else %}<strong class="error">The recycle folder is off (Settings): they are deleted for good.</strong>{% endif %}</small>
+  </label>
+  {% if plan.folder_note %}<p class="muted small">{{ plan.folder_note }}</p>{% endif %}
+  {% if plan.files %}<details><summary class="small">Files</summary><ul class="small">{% for f in plan.files %}<li><code>{{ f }}</code></li>{% endfor %}</ul></details>{% endif %}
+  {% else %}
+  <p class="muted">It has no files in the library; nothing on disk changes.</p>
+  {% endif %}
+  <div class="row"><button>Delete series</button> <a href="/series/{{ s.id }}">Cancel</a></div>
+</form>
+{% endif %}
+{% endblock %}

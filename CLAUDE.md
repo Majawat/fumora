@@ -24,7 +24,9 @@ docker compose up --build
 - All Metron calls go through the single `app.state.metron_limiter` (burst 20, 5,000/day).
 - Secrets live in the `setting` table and are never rendered back to the browser or logged.
 - TRaSH Guides paths: one `/data` mount shared with the download clients; library default `/data/media/comics` (configurable). Import = hardlink (torrents) or rename/move (usenet), never copy across mounts.
-- Never delete library files; never chown anything outside `/config`.
+- Library files are deleted only by the owner's own action in the UI (Delete series with "also delete its
+  files" ticked); replaced originals and deleted files go to the recycle folder unless the owner turned it off
+  (`library.recycle`, see `recycle.py`). Fumora never decides by itself to delete. Never chown anything outside `/config`.
 - Tests stay offline (respx mocks). `tests/test_migrations.py` fails if models and migrations drift.
 - Files get ComicInfo.xml 2.1 + MetronInfo.xml 1.1, merged — never drop fields we don't own (e.g. `<Tags>`).
 - No integration with Komga or BookOrbit; they folder-watch.

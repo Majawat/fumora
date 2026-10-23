@@ -37,11 +37,12 @@ from .library_jobs import naming_settings
 from .models import Blocklist, File, Grab, Issue, Series
 from .numbers import normalize_number
 from .perms import normalize
+from .recycle import recycle_dir
 from .releases import parse_release, series_key
 from .scanner import COMIC_EXTS, parse_issue_number
 from .search import Candidate
 from .shelfmark import ShelfmarkClient
-from .tagging import DEFAULT_RECYCLE, tag_file
+from .tagging import tag_file
 
 logger = logging.getLogger("fumora.grabbing")
 ACTIVE = ("queued", "downloading", "importing")
@@ -276,9 +277,9 @@ def place_issue_file(
         placed = src
     elif in_place:
         # Already in the library at its own name: converted where it is, and the
-        # original goes to the recycle folder (never deleted, never overwritten).
-        recycle = settings_store.get(db, "library.recycle_path") or DEFAULT_RECYCLE
-        placed = convert.convert_to_cbz(src, recycle)
+        # original goes to the recycle folder (never overwritten; deleted only if the
+        # owner turned the recycle folder off).
+        placed = convert.convert_to_cbz(src, recycle_dir(db))
     elif convert.needs_conversion(src):
         placed = _place_converted(src, dest)
         if not keep_original:
@@ -360,7 +361,7 @@ def import_grab(db: Session, g: Grab, path: str) -> str:
         raise ImportFailed(f"No comic files found in {path}")
 
     opts = naming_settings(db)
-    recycle = settings_store.get(db, "library.recycle_path") or "/data/media/fumora-recycle"
+    recycle = recycle_dir(db)
     tags_on = tags_on_import(db, g.protocol)
     imported, skipped = [], []
     for f in files:

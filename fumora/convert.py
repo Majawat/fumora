@@ -17,11 +17,11 @@ import shutil
 import subprocess
 import uuid
 import zipfile
-from datetime import date
 from pathlib import Path
 
 from .cbz import IMAGE_EXTS, ArchiveError
 from .perms import normalize
+from .recycle import discard
 
 CONVERTIBLE_EXTS = {".cbr", ".cb7", ".cbt", ".rar", ".7z", ".pdf"}
 # 300 dpi renders a 6.6 x 10.2 inch comic page at about 1990 x 3060 px, the
@@ -147,21 +147,7 @@ def read_member(path: str | Path, name: str) -> bytes | None:
 
 
 def _recycle(path: Path, recycle_dir: Path | None) -> Path | None:
-    if recycle_dir is None:
-        path.unlink()
-        return None
-    target_dir = recycle_dir / date.today().isoformat()
-    target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / path.name
-    n = 1
-    while target.exists():
-        target = target_dir / f"{path.stem} ({n}){path.suffix}"
-        n += 1
-    try:
-        os.rename(path, target)
-    except OSError:
-        shutil.move(str(path), str(target))  # recycle folder on another mount
-    return target
+    return discard(path, recycle_dir)
 
 
 def _write_cbz(src: Path, kind: str, out: Path, work: Path) -> None:
@@ -197,8 +183,8 @@ def _write_cbz(src: Path, kind: str, out: Path, work: Path) -> None:
 def convert_to_cbz(path: str | Path, recycle_dir: str | Path | None) -> Path:
     """Convert one file to .cbz next to it; returns the new path.
 
-    The original goes to `recycle_dir`; pass None only for a file Fumora itself
-    just placed (an imported download), which is then simply removed."""
+    The original goes to `recycle_dir`; None deletes it (a file Fumora itself just
+    placed, or the owner turned the recycle folder off: `recycle.recycle_dir`)."""
     path = Path(path)
     target = path.with_suffix(".cbz")
     if target != path and target.exists():
