@@ -32,6 +32,7 @@ from .metron import MetronAuthError, MetronClient, MetronError, RateLimiter
 from .models import Event, Issue, Series, User
 from .perms import folder_problems
 from .refresh import REFRESH, make_refresh_handler
+from .rss import RSS, make_rss_handler
 from .scheduler import ensure_refresh_time, run_download_monitor, run_scheduler
 from .shelfmark import ShelfmarkClient, ShelfmarkError
 from .sources import CV_REFRESH, make_cv_refresh_handler
@@ -91,6 +92,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     jobs.register(ORGANIZE, make_organize_handler())
     jobs.register(REFRESH, make_refresh_handler(make_metron_client))
     jobs.register(SEARCH, make_search_handler())
+    jobs.register(RSS, make_rss_handler())
 
     # ComicVine (series Metron doesn't have): its own limiter, same rules.
     comicvine_limiter = make_cv_limiter()

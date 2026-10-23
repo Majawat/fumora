@@ -11,6 +11,7 @@ from .auto_search import SEARCH
 from .grabbing import check_downloads
 from .models import Event, Setting
 from .refresh import REFRESH
+from .rss import RSS
 from .sources import CV_REFRESH
 
 log = logging.getLogger("fumora.scheduler")
@@ -78,6 +79,16 @@ async def scheduled_backup(db, now: datetime) -> None:
     db.add(Event(kind="backup", message=f"Backed up the database: {made.name}"
                  + (f" (removed {len(gone)} old)" if gone else "")))  # fmt: skip
     db.commit()
+
+
+def rss_due(now: datetime, auto: str | None, every_minutes: str | None, last: str | None) -> bool:
+    if auto != "on" or not every_minutes:
+        return False
+    try:
+        minutes = max(5.0, float(every_minutes))
+    except ValueError:
+        return False
+    return not last or (now - datetime.fromisoformat(last)).total_seconds() >= minutes * 60
 
 
 def search_due(now: datetime, enabled: str | None, every_hours: str | None, last: str | None) -> bool:
@@ -164,6 +175,20 @@ async def run_scheduler(session_factory, jobs, check_every: int = CHECK_EVERY) -
                         db.add(Event(kind="backup", level="error", message=f"Scheduled backup failed: {exc}"))
                         db.commit()
                         log.exception("scheduled backup failed")
+                if (
+                    rss_due(
+                        now,
+                        settings_store.get(db, "search.auto"),
+                        settings_store.get(db, "search.rss_minutes"),
+                        settings_store.get_state(db, "schedule.rss.last"),
+                    )
+                    and settings_store.is_set(db, "prowlarr.api_key")
+                    and jobs.active(RSS) is None
+                    and jobs.active(SEARCH) is None  # the search grabs for the same issues
+                ):
+                    settings_store.put_state(db, "schedule.rss.last", now.isoformat())
+                    db.commit()
+                    jobs.start(RSS, {})
                 last_search = settings_store.get_state(db, "schedule.search.last")
                 if (
                     search_due(

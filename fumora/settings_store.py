@@ -221,6 +221,11 @@ SETTINGS += [
                help="Give a digital release time to appear before settling for something else."),
     SettingDef("search.retry_failed", "When a download fails", "Search", default="on",
                choices=(("on", "search again for that issue (up to 5 times a day)"), ("off", "do nothing"))),
+    SettingDef("search.rss_minutes", "RSS sync", "Search", default="30", allow_empty=True,
+               choices=(("15", "every 15 minutes"), ("30", "every 30 minutes"), ("60", "every hour"),
+                        ("", "off")),
+               help="Checks Prowlarr's newest comics releases for Wanted issues (one request per indexer). "
+               "Needs automatic search on; the regular Wanted search still runs."),
     SettingDef("backup.interval_days", "Back up the database every", "Backups", default="7", allow_empty=True,
                choices=(("1", "day"), ("3", "3 days"), ("7", "week"), ("14", "2 weeks"),
                         ("", "never (by hand only)")),

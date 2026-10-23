@@ -45,35 +45,7 @@ def make_search_handler():
                 raise RuntimeError(
                     "No search source is set up (Prowlarr, GetComics or Shelfmark in Settings)"
                 )
-            q = (
-                select(Issue)
-                .join(Series)
-                .options(selectinload(Issue.series).selectinload(Series.issues), selectinload(Issue.files))
-            )
-            if by_hand:
-                # Asked for by hand: search them even if not monitored, as long as there's no file.
-                q = q.where(Issue.id.in_(only), ~Issue.files.any())
-            elif only:
-                q = q.where(Issue.id.in_(only), monitoring.wanted_clause())
-            else:
-                q = q.where(monitoring.wanted_clause())
-            wanted = db.scalars(q).all()
-            # A failed import needs a look (Queue: Try another blocklists it and searches
-            # again); grabbing the same release automatically would fail the same way.
-            stuck = {
-                i
-                for g in db.scalars(select(Grab).where(Grab.state == "import_failed"))
-                for i in (g.issue_ids or [g.issue_id])
-            }
-            if not by_hand:  # asked for by hand: the owner has looked
-                wanted = [i for i in wanted if i.id not in stuck]
-            cutoff = (datetime.now(UTC) - timedelta(hours=delay)).date()
-            todo = [
-                i
-                for i in wanted
-                if _searchable(active_grab(db, i.id))
-                and (by_hand or delay <= 0 or (monitoring.release_date(i) or cutoff) <= cutoff)
-            ]
+            todo = searchable_wanted(db, only, by_hand, delay)
             by_series: dict[int, list[Issue]] = defaultdict(list)
             for i in todo:
                 by_series[i.series_id].append(i)
@@ -127,28 +99,10 @@ def make_search_handler():
                         if best is None:
                             missing += 1
                             continue
-                        if waiting is not None:
-                            db.refresh(waiting)
-                            if waiting.state != APPROVAL:
-                                continue  # approved (or removed) by the owner meanwhile
-                        if waiting is not None and best.holdable:
-                            continue  # a release held for an OK, and still nothing better
-                        if db.scalar(select(File.id).where(File.issue_id == issue.id).limit(1)):
-                            continue  # imported while this search was waiting on indexers
-                        try:
-                            await grab(db, best, issue, approval=best.holdable)
-                            if waiting is not None:  # only once the better one was sent
-                                waiting.state = "removed"
-                                waiting.message = f"Superseded by '{best.parsed.title}'"
-                            taken.add(best.release.get("guid") or best.parsed.title)
-                            if best.holdable:
-                                held += 1
-                            else:
-                                grabbed += 1
-                        except DownloaderError as exc:
-                            errors += 1
-                            log(db, f"Couldn't send '{best.parsed.title}': {exc}", kind=SEARCH, level="error")
-                        db.commit()
+                        outcome = await send_best(db, issue, best, waiting, taken)
+                        grabbed += outcome == "grabbed"
+                        held += outcome == "held"
+                        errors += outcome == "error"
                     ctx.update(progress=n)
             summary = f"Searched {len(todo)} wanted issues: grabbed {grabbed}, nothing found for {missing}"
             if held:
@@ -160,6 +114,68 @@ def make_search_handler():
             return summary
 
     return run
+
+
+def searchable_wanted(db, only: set[int], by_hand: bool, delay: float) -> list[Issue]:
+    """Wanted issues a search may grab for now: monitored, released (past the delay), no
+    file, no download under way (a release held for an OK may still be bettered), and no
+    failed import waiting for a look. by_hand: the issues in `only`, monitored or not."""
+    q = (
+        select(Issue)
+        .join(Series)
+        .options(selectinload(Issue.series).selectinload(Series.issues), selectinload(Issue.files))
+    )
+    if by_hand:
+        # Asked for by hand: search them even if not monitored, as long as there's no file.
+        q = q.where(Issue.id.in_(only), ~Issue.files.any())
+    elif only:
+        q = q.where(Issue.id.in_(only), monitoring.wanted_clause())
+    else:
+        q = q.where(monitoring.wanted_clause())
+    wanted = db.scalars(q).all()
+    # A failed import needs a look (Queue: Try another blocklists it and searches
+    # again); grabbing the same release automatically would fail the same way.
+    stuck = {
+        i
+        for g in db.scalars(select(Grab).where(Grab.state == "import_failed"))
+        for i in (g.issue_ids or [g.issue_id])
+    }
+    if not by_hand:  # asked for by hand: the owner has looked
+        wanted = [i for i in wanted if i.id not in stuck]
+    cutoff = (datetime.now(UTC) - timedelta(hours=delay)).date()
+    todo = [
+        i
+        for i in wanted
+        if _searchable(active_grab(db, i.id))
+        and (by_hand or delay <= 0 or (monitoring.release_date(i) or cutoff) <= cutoff)
+    ]
+    return todo
+
+
+async def send_best(db, issue: Issue, best, waiting: Grab | None, taken: set[str]) -> str:
+    """Grab `best` for `issue` (held for an OK if it needs one). Returns grabbed, held,
+    skipped (approved/removed or imported meanwhile, or nothing better than the held one)
+    or error."""
+    if waiting is not None:
+        db.refresh(waiting)
+        if waiting.state != APPROVAL:
+            return "skipped"  # approved (or removed) by the owner meanwhile
+    if waiting is not None and best.holdable:
+        return "skipped"  # a release held for an OK, and still nothing better
+    if db.scalar(select(File.id).where(File.issue_id == issue.id).limit(1)):
+        return "skipped"  # imported while the search was waiting on indexers
+    try:
+        await grab(db, best, issue, approval=best.holdable)
+        if waiting is not None:  # only once the better one was sent
+            waiting.state = "removed"
+            waiting.message = f"Superseded by '{best.parsed.title}'"
+        taken.add(best.release.get("guid") or best.parsed.title)
+        outcome = "held" if best.holdable else "grabbed"
+    except DownloaderError as exc:
+        log(db, f"Couldn't send '{best.parsed.title}': {exc}", kind=SEARCH, level="error")
+        outcome = "error"
+    db.commit()
+    return outcome
 
 
 def _searchable(g) -> bool:

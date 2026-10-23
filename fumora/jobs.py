@@ -134,9 +134,17 @@ class JobRunner:
         task.cancel()
         return True
 
-    def recent(self, limit: int = 30) -> list[Job]:
+    def recent(self, limit: int = 30, frequent: tuple[str, ...] = ("rss",)) -> list[Job]:
+        """The latest jobs. Of kinds that run every few minutes (RSS sync), only the
+        newest run, so they don't push the rest off the page."""
         with self.session_factory() as db:
-            return db.scalars(select(Job).order_by(Job.id.desc()).limit(limit)).all()
+            q = select(Job).where(Job.kind.not_in(frequent)).order_by(Job.id.desc()).limit(limit)
+            jobs = list(db.scalars(q))
+            for kind in frequent:
+                last = db.scalar(select(Job).where(Job.kind == kind).order_by(Job.id.desc()).limit(1))
+                if last is not None:
+                    jobs.append(last)
+            return sorted(jobs, key=lambda j: j.id, reverse=True)[:limit]
 
     async def shutdown(self) -> None:
         for task in self._tasks.values():
