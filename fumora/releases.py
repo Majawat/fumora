@@ -56,7 +56,7 @@ _VOLUMES = re.compile(
     re.I,
 )
 _ISSUE = re.compile(
-    r"(?<![\w.])(?:#\s?|no\.?\s?|issue\s)?(-?\d{1,4}(?:\.\d+)?|½)(?:\s?\(of\s\d+\))?(?![\w])", re.I
+    r"(?<![\w.'’])(?:#\s?|no\.?\s?|issue\s)?(-?\d{1,4}(?:\.\d+)?|½)(?:\s?\(of\s\d+\))?(?![\w])", re.I
 )
 
 
@@ -128,7 +128,11 @@ def _scene_to_spaces(title: str) -> str:
     # whatever the tags around it) or is underscored. Abbreviations ("U.S.A.", "G.I. Joe",
     # "B.P.R.D. 001") and "Mr. Miracle" or "Vol. 2" keep their dots.
     def scene(w: str) -> bool:
-        return (w.count(".") >= 2 and any(ch.isdigit() for ch in w)) or w.count("_") >= 2
+        return (
+            (w.count(".") >= 2 and any(ch.isdigit() for ch in w))
+            or w.count("_") >= 2
+            or (w == title and re.search(r"[A-Za-z]\.\d", w) is not None)  # "Fairest.18"
+        )
 
     if not any(scene(w) for w in title.split()):
         return title
@@ -149,7 +153,9 @@ def parse_release(title: str) -> ParsedRelease:
     raw = html.unescape(title or "").strip()
     r = ParsedRelease(title=raw)
     # GetComics writes ranges and subtitles with en/em dashes ("#20 – 23").
-    text = _scene_to_spaces(raw.replace("–", "-").replace("—", "-"))
+    dashed = raw.replace("–", "-").replace("—", "-")
+    text = _scene_to_spaces(dashed)
+    scene_name = text != dashed or " " not in raw  # dotted/underscored scene style
     # "Issue 1 through 100" / "Issues 1 thru 12": an issue range, written out. Only after
     # "Issue(s)": "Vol 1 through 5" stays volumes.
     text = re.sub(r"(?i)\bissues?\s+(\d{1,4})\s+(?:through|thru)\s+(\d{1,4})\b", r"\1-\2", text)
@@ -163,7 +169,11 @@ def parse_release(title: str) -> ParsedRelease:
         lang = m.group(1).lower()
         r.language = "en" if lang == "eng" else LANGUAGES.get(lang, lang)
         r.formats |= {f.lower() for f in m.group(2).split()}
-    text = re.sub(r"\s+by\s+[^\[(]*", " ", text)
+    # MyAnonamouse's "... by Author, Publisher [ENG / CBZ]": the authors go. Elsewhere "by" may be
+    # the title ("Batman – Gotham by Gaslight", "Spider-Man by Joe Kelly Omnibus"): kept, with the
+    # name without "by Writer" as a second reading (below).
+    if m:
+        text = re.sub(r"\s+by\s+[^\[(]*", " ", text)
 
     # Bracketed tags: year, source, group, counts, formats...
     tags = re.findall(r"[\[(]([^\])]*)[\])]", text)
@@ -197,9 +207,15 @@ def parse_release(title: str) -> ParsedRelease:
 
     # Scene names: "Publisher-Series ... YEAR HYBRID COMIC[ eBook-GROUP]".
     # Also "Publisher - Series" ("Yen.Press.-.Mieruko.Chan..." once dots are spaces).
+    # A scene name's publisher prefix goes; elsewhere ("Marvel – DC – Spider-Man – Superman #1") it
+    # may be the title, so the name without it is only a second reading (below).
     sm = re.match(r"^([A-Za-z ]+?)\s*-\s*([A-Za-z].*)$", body.strip())
+    publisher_prefix = None
     if sm and sm.group(1).lower().strip() in SCENE_PUBLISHERS:
-        body = sm.group(2)
+        if scene_name:
+            body = sm.group(2)
+        else:
+            publisher_prefix = sm.group(1).strip()
     if re.search(r"hybrid\s+comic|retail\s+comic|hybrid\s+manga", lowered):
         # Scene group: the part after the last "-" of the original dotted name.
         if " " not in raw and (sg := re.search(r"-([A-Za-z0-9]+)$", raw)) and not sg.group(1).isdigit():
@@ -303,10 +319,23 @@ def parse_release(title: str) -> ParsedRelease:
         r.group = dg.group(1)
     if r.kind in ("volume", "volumes"):
         series = re.sub(r"\s+tpbs?$", "", series, flags=re.I)  # "The Walking Dead TPBs v.01-29"
+    # A collected edition ("(TPB)", "(HC)", "Omnibus") never is a single issue (a TPB is its own series).
+    if r.kind == "issue" and any(
+        re.fullmatch(r"(?i)(fan-made\s+)?(tpb|hc|hardcover|trade paperback|omnibus|ogn|gn|deluxe edition)", t)
+        for t in r.tags
+    ):
+        r.kind = "volume"
     r.series = series
-    # Scene names "Writer Name-Title.017": the title alone is a second reading of the series.
-    if " " not in raw and (am := re.match(r"^((?:[A-Z][a-z]+ ){1,2}[A-Z][a-z]+)-(\S.*)$", series)):
+    # Second readings of the series: a scene name's writer prefix ("Kelly.Thompson-Absolute.
+    # Wonder.Woman.017"), a title's publisher prefix, a "by Writer" in the name.
+    if scene_name and (am := re.match(r"^((?:[A-Z][a-z]+ ){1,2}[A-Z][a-z]+)-(\S.*)$", series)):
         r.alt_series = am.group(2)
+    elif publisher_prefix and series.startswith(publisher_prefix):
+        r.alt_series = re.sub(r"^\s*[-–]\s*", "", series[len(publisher_prefix) :]).strip() or None
+    elif (bm := re.match(r"^(.+?)\s+[Bb]y\s+((?:[A-Z][\w.'’-]*\s*){1,4})$", series)) and not re.search(
+        r"(?i)\b(omnibus|collection|edition|epic|library|compendium)\b", bm.group(2)
+    ):
+        r.alt_series = bm.group(1)  # "Miles Morales – Spider-Man by Cody Ziglar" (Vol. 6)
     return r
 
 
