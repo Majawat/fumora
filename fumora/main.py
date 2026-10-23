@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import __version__, monitoring, settings_store
+from . import __version__, backup, monitoring, settings_store
 from .auth import hash_password, load_or_create_secret, verify_password
 from .auto_search import SEARCH, make_search_handler
 from .comicvine import ComicVineClient, ComicVineError
@@ -36,6 +36,7 @@ from .scheduler import ensure_refresh_time, run_download_monitor, run_scheduler
 from .shelfmark import ShelfmarkClient, ShelfmarkError
 from .sources import CV_REFRESH, make_cv_refresh_handler
 from .web.activity_routes import register_activity_routes
+from .web.backup_routes import register_backup_routes
 from .web.catalog_routes import register_catalog_routes
 from .web.import_routes import register_import_routes
 from .web.library import register_library_routes
@@ -51,9 +52,19 @@ PUBLIC_PATHS = ("/static/", "/login", "/setup", "/api/health")
 def create_app(config: Config | None = None) -> FastAPI:
     config = config or load_config()
     config.config_dir.mkdir(parents=True, exist_ok=True)
+    restored = backup.apply_pending_restore(config.config_dir, config.db_path)  # before anything opens it
     upgrade_db(config.db_url)
     engine = make_engine(config.db_url)
     SessionLocal = make_session_factory(engine)
+    if restored:
+        log.warning(restored)
+        with SessionLocal() as db:
+            db.add(
+                Event(
+                    kind="backup", level="warning" if "not applied" in restored else "info", message=restored
+                )
+            )
+            db.commit()
 
     # One limiter for the whole process: all Metron calls share its budget.
     metron_limiter = RateLimiter()
@@ -353,6 +364,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     register_search_routes(app, templates, get_db)
     register_import_routes(app, templates, get_db)
     register_activity_routes(app, templates, get_db)
+    register_backup_routes(app, templates, get_db, config)
 
     @app.get("/api/health")
     def health():

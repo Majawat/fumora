@@ -73,5 +73,7 @@ def test_blocklist_remove_and_clear(app, logged_in):
     logged_in.post("/blocklist/clear")
     with app.state.session_factory() as db:
         assert db.scalar(select(func.count(Blocklist.id))) == 0
-        assert "Cleared the blocklist (2 releases)" in db.scalar(select(Event.message).order_by(Event.id.desc()))
+        assert "Cleared the blocklist (2 releases)" in db.scalar(
+            select(Event.message).order_by(Event.id.desc())
+        )
     assert logged_in.post("/blocklist/999/remove").status_code == 404

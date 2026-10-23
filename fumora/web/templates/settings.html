@@ -2,6 +2,7 @@
 {% block title %}Settings · Fumora{% endblock %}
 {% block content %}
 <h1>Settings</h1>
+<p><a href="/backups">Backups</a> · <a href="/history">History</a></p>
 {% if saved is not none %}
 <p class="notice">{% if saved %}Saved.{% else %}No changes.{% endif %}</p>
 {% endif %}

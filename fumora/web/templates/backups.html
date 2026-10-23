@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Backups · Fumora{% endblock %}
+{% block content %}
+<p><a href="/settings">← Settings</a></p>
+<h1>Backups</h1>
+{% if message %}<p class="notice ok">{{ message }}</p>{% endif %}
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+{% if pending %}
+<section class="card attention">
+  <h2>A restore is waiting</h2>
+  <p>It replaces the database the next time Fumora starts (restart the container from Unraid's Docker
+  page). The current database is backed up first ("pre-restore").</p>
+  <form method="post" action="/backups/cancel-restore"><button class="secondary">Cancel the restore</button></form>
+</section>
+{% endif %}
+<section class="card">
+  <p class="muted">In <code>{{ folder }}</code>. The schedule and how many to keep are in
+  <a href="/settings#Backups">Settings → Backups</a>. A backup holds every setting, API keys and passwords
+  included: keep downloaded copies private.</p>
+  <form method="post" action="/backups/now"><button>Back up now</button></form>
+</section>
+{% if backups %}
+<table>
+  <thead><tr><th>Made (UTC)</th><th>Kind</th><th>Size</th><th></th></tr></thead>
+  <tbody>
+  {% for b in backups %}
+    <tr>
+      <td>{{ b.created.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td>{{ b.label }}</td>
+      <td>{{ "%.1f"|format(b.size / 1048576) }} MB</td>
+      <td class="row">
+        <a href="/backups/{{ b.name }}/download">Download</a>
+        <form method="post" action="/backups/{{ b.name }}/restore"><button class="secondary">Restore…</button></form>
+        <form method="post" action="/backups/{{ b.name }}/delete"><button class="link">Delete</button></form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No backups yet.</p>
+{% endif %}
+<form class="card" method="post" action="/backups/upload" enctype="multipart/form-data">
+  <h2>Upload a backup</h2>
+  <p class="muted small">A <code>.db</code> file downloaded from here (this or another Fumora). It is checked, then listed above to restore.</p>
+  <input type="file" name="upload" accept=".db" required>
+  <button class="secondary">Upload</button>
+</form>
+{% endblock %}
