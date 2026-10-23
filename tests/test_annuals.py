@@ -130,3 +130,29 @@ def test_set_and_clear_the_parent_by_hand(app, logged_in):
     logged_in.post(f"/series/{aid}/parent", data={"parent_id": ""})
     with app.state.session_factory() as db:
         assert db.get(Series, aid).parent_id is None
+
+
+def test_year_in_the_name_and_linking_once_after_the_upgrade(app, config):
+    from fumora.main import create_app
+
+    with app.state.session_factory() as db:
+        flash = _s(db, "The Flash", 2016)
+        a = _s(db, "The Flash 2021 Annual", 2021)
+        b = _s(db, "My Little Pony Annual 2021", 2021)
+        pony = _s(db, "My Little Pony", 2012)
+        db.commit()
+        ids = (a.id, b.id, flash.id, pony.id)
+    from fumora import settings_store
+
+    with app.state.session_factory() as db:  # the first start already linked (nothing then)
+        settings_store.put_state(db, "annuals.linked_once", None)
+        db.commit()
+    again = create_app(config)
+    with again.state.session_factory() as db:
+        assert db.get(Series, ids[0]).parent_id == ids[2]
+        assert db.get(Series, ids[1]).parent_id == ids[3]
+        db.get(Series, ids[0]).parent_id = None  # unlinked by hand: stays unlinked
+        db.commit()
+    third = create_app(config)
+    with third.state.session_factory() as db:
+        assert db.get(Series, ids[0]).parent_id is None

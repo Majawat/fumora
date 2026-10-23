@@ -114,3 +114,14 @@ async def test_one_scheduler_pass_starts_rss_and_backs_up(app, tmp_path, config)
     await asyncio.sleep(0.3)
     task.cancel()
     assert "rss" not in jobs.started
+
+
+def test_rss_now_button(app, logged_in):
+    started = []
+    app.state.jobs.start = lambda kind, params=None: started.append(kind) or 1
+    assert logged_in.post("/wanted/rss", follow_redirects=False).status_code == 303
+    assert started == ["rss"]
+    with app.state.session_factory() as db:
+        db.add(Job(kind="search", state="running"))
+        db.commit()
+    assert logged_in.post("/wanted/rss").status_code == 409

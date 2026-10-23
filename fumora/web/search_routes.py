@@ -20,6 +20,7 @@ from ..grabbing import APPROVAL, active_grab, blocklist, client_for, grab, is_bl
 from ..importer import log
 from ..indexers import Indexers
 from ..models import Grab, Issue, Series
+from ..rss import RSS
 from ..search import evaluate, fallback_queries, load_profile, queries_for, rank, wants
 
 RESULTS_TTL = 30 * 60
@@ -144,6 +145,14 @@ def register_search_routes(app: FastAPI, templates: Jinja2Templates, get_db) -> 
         if app.state.jobs.active(SEARCH) is not None:
             raise HTTPException(409, "A search is already running; see Jobs.")
         app.state.jobs.start(SEARCH, {})
+        return RedirectResponse("/jobs", status_code=303)
+
+    @app.post("/wanted/rss")
+    async def wanted_rss():
+        for kind, what in ((RSS, "An RSS sync"), (SEARCH, "A search")):
+            if app.state.jobs.active(kind) is not None:
+                raise HTTPException(409, f"{what} is already running; see Jobs.")
+        app.state.jobs.start(RSS, {})
         return RedirectResponse("/jobs", status_code=303)
 
     def queue_context(db: Session) -> dict:

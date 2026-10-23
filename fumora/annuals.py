@@ -16,7 +16,10 @@ from sqlalchemy.orm import Session
 from .models import Series
 from .releases import series_key
 
-_SUFFIX = re.compile(r"\s+(annual|special|specials|annuals)$", re.I)
+# "Annual", "2021 Annual", "Annual 2021", "Special": what makes a series another's annual.
+_SUFFIX = re.compile(
+    r"\s+(?:(?:19|20)\d{2}\s+)?(?:annual|annuals|special|specials)(?:\s+(?:19|20)\d{2})?$", re.I
+)
 KINDS = ("Annual",)  # Metron series types that belong to another series
 
 
@@ -83,6 +86,18 @@ def link(series: Series, parent: Series | None) -> None:
     series.parent_id = parent.id if parent is not None else None
     if parent is not None and parent.path and not any(i.files for i in series.issues):
         series.path = parent.path
+
+
+def link_once(db: Session) -> int:
+    """After the upgrade that added the link: link the annuals already in the database once."""
+    from . import settings_store
+
+    if settings_store.get_state(db, "annuals.linked_once"):
+        return 0
+    n = link_unlinked(db)
+    settings_store.put_state(db, "annuals.linked_once", "1")
+    db.commit()
+    return n
 
 
 def link_unlinked(db: Session) -> int:

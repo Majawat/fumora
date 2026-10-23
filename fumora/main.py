@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import __version__, backup, monitoring, settings_store
+from . import __version__, annuals, backup, monitoring, settings_store
 from .auth import hash_password, load_or_create_secret, verify_password
 from .auto_search import SEARCH, make_search_handler
 from .comicvine import ComicVineClient, ComicVineError
@@ -58,6 +58,10 @@ def create_app(config: Config | None = None) -> FastAPI:
     upgrade_db(config.db_url)
     engine = make_engine(config.db_url)
     SessionLocal = make_session_factory(engine)
+    with SessionLocal() as db:
+        if linked := annuals.link_once(db):
+            db.add(Event(kind="series", message=f"Linked {linked} annuals/specials to their main series"))
+            db.commit()
     if restored:
         log.warning(restored)
         with SessionLocal() as db:
