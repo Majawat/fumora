@@ -17,6 +17,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import quote
 
 from .perms import normalize
 
@@ -64,6 +65,9 @@ def make_backup(db_path: Path, folder: Path, label: str = "manual") -> Path:
         dst = sqlite3.connect(tmp)
         try:
             src.backup(dst)
+            # A copy of a WAL database is in WAL mode too: then merely opening it leaves
+            # -wal/-shm files next to it. A backup is one self-contained file.
+            dst.execute("PRAGMA journal_mode=DELETE")
         finally:
             dst.close()
     finally:
@@ -105,7 +109,8 @@ def prune(folder: Path, keep: int) -> list[str]:
 def check(path: Path, known_revisions: set[str]) -> str:
     """Is this a sound Fumora database this version can use? Returns its schema revision."""
     try:
-        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        # immutable: read the file as it is and write nothing next to it (no -wal/-shm).
+        con = sqlite3.connect(f"file:{quote(str(path))}?mode=ro&immutable=1", uri=True)
     except sqlite3.Error as exc:
         raise BackupError(f"Not a database: {exc}") from exc
     try:
@@ -168,8 +173,9 @@ def apply_pending_restore(config_dir: Path, db_path: Path) -> str | None:
     saved = None
     if db_path.exists():
         saved = make_backup(db_path, backup_dir(config_dir), "pre-restore")
-    for f in (db_path.with_name(db_path.name + "-wal"), db_path.with_name(db_path.name + "-shm")):
-        f.unlink(missing_ok=True)
+    for base in (db_path, pending):
+        for f in (base.with_name(base.name + "-wal"), base.with_name(base.name + "-shm")):
+            f.unlink(missing_ok=True)
     os.replace(pending, db_path)
     normalize(db_path)
     return "Database restored from a backup" + (f"; the one it replaced is {saved.name}" if saved else "")

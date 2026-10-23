@@ -154,3 +154,17 @@ def test_backup_schedule(app, config):
         assert settings_store.get_state(db, "schedule.backup.last") == now.isoformat()
     kinds = [b.label for b in backup.list_backups(folder)]
     assert kinds.count("scheduled") == 3
+
+
+def test_backups_are_one_self_contained_file(app, config, tmp_path):
+    # Live test on Unraid: a backup of the WAL database stayed in WAL mode, so checking it
+    # (or restoring it) left -wal/-shm files lying next to it.
+    _add(app, "Saga")
+    folder = backup.backup_dir(config.config_dir)
+    made = backup.make_backup(config.db_path, folder, "manual")
+    backup.check(made, backup.known_revisions())
+    backup.stage_restore(config.config_dir, made)
+    assert sorted(p.name for p in folder.iterdir()) == [made.name]
+    assert sqlite3.connect(made).execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+    create_app(config)
+    assert not list(config.config_dir.glob("restore-pending*"))
