@@ -12,6 +12,7 @@ from ..importer import log
 from ..library_jobs import RETAG, SCAN
 from ..models import File, Issue, Series, Tag
 from ..ratings import METRON_RATINGS, issue_rating
+from .activity_routes import recent_history
 
 
 def _count(db: Session, q) -> int:
@@ -130,6 +131,7 @@ def register_admin_routes(app: FastAPI, templates: Jinja2Templates, get_db) -> N
                 "effective": issue_rating(issue),
                 "tag_names": ", ".join(sorted(t.name for t in issue.tags)),
                 "series_tags": ", ".join(sorted(t.name for t in issue.series.tags)),
+                "history": recent_history(db, 50, issue_id=issue.id),
             },
         )
 

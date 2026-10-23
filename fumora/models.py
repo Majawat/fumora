@@ -285,6 +285,8 @@ class Blocklist(Base):
     title: Mapped[str] = mapped_column(String(500))
     reason: Mapped[str | None] = mapped_column(String(500))
     created: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    series_id: Mapped[int | None] = mapped_column(ForeignKey("series.id", ondelete="SET NULL"))
+    issue_id: Mapped[int | None] = mapped_column(ForeignKey("issue.id", ondelete="SET NULL"))
 
 
 class Event(Base):
@@ -297,8 +299,8 @@ class Event(Base):
     level: Mapped[str] = mapped_column(String(10), default="info")
     kind: Mapped[str] = mapped_column(String(50))
     message: Mapped[str] = mapped_column(Text)
-    series_id: Mapped[int | None] = mapped_column(ForeignKey("series.id", ondelete="SET NULL"))
-    issue_id: Mapped[int | None] = mapped_column(ForeignKey("issue.id", ondelete="SET NULL"))
+    series_id: Mapped[int | None] = mapped_column(ForeignKey("series.id", ondelete="SET NULL"), index=True)
+    issue_id: Mapped[int | None] = mapped_column(ForeignKey("issue.id", ondelete="SET NULL"), index=True)
 
 
 class Job(Base):

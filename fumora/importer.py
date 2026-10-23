@@ -464,6 +464,9 @@ def import_report(db: Session) -> dict:
 
 
 def log(db: Session, message: str, kind: str = "import", level: str = "info", **ids) -> None:
+    if ids.get("issue_id") and not ids.get("series_id"):
+        # Every issue event is also its series' (the series page's History).
+        ids["series_id"] = db.scalar(select(Issue.series_id).where(Issue.id == ids["issue_id"]))
     db.add(Event(kind=kind, level=level, message=message, **ids))
 
 

@@ -25,6 +25,7 @@ from ..ratings import METRON_RATINGS, series_rating, strictest
 from ..recycle import recycle_dir
 from ..series_delete import DeleteFailed, delete_series, plan_delete
 from ..sources import CHECK_NOTE, CV_REFRESH, accept_suggestion, reject_metron_match
+from .activity_routes import recent_history
 
 MATCH_LABELS = {
     "matched": "Matched",
@@ -102,6 +103,7 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
             "tag_names": ", ".join(sorted(t.name for t in series.tags)),
             "plan": plan,
             "writable": series.writable,
+            "history": recent_history(db, 25, series_id=series.id),
         }
 
     @app.get("/series/{series_id}", response_class=HTMLResponse)

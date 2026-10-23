@@ -101,7 +101,20 @@ def blocklist(db: Session, grab: Grab, reason: str) -> None:
         )
     )
     if exists is None:
-        db.add(Blocklist(guid=grab.guid, title=grab.release_title, reason=(reason or "")[:500]))
+        db.add(
+            Blocklist(
+                guid=grab.guid,
+                title=grab.release_title,
+                reason=(reason or "")[:500],
+                issue_id=grab.issue_id,
+                series_id=grab.series_id
+                or (
+                    db.scalar(select(Issue.series_id).where(Issue.id == grab.issue_id))
+                    if grab.issue_id
+                    else None
+                ),
+            )
+        )
 
 
 def covered_issues(c: Candidate, issue: Issue) -> list[int]:
@@ -412,7 +425,14 @@ def _import_in_thread(session_factory, grab_id: int, path: str) -> None:
             db.rollback()
             g = db.get(Grab, grab_id)
             g.state, g.message = "import_failed", str(exc)[:500]
-            log(db, f"Import failed for '{g.release_title}': {exc}", kind="import", level="error")
+            log(
+                db,
+                f"Import failed for '{g.release_title}': {exc}",
+                kind="import",
+                level="error",
+                issue_id=g.issue_id,
+                series_id=g.series_id,
+            )
         g.finished = datetime.now(UTC)
         db.commit()
 
@@ -522,7 +542,12 @@ async def check_downloads(session_factory, on_failed=None, before_import=None) -
                         client.forget(g.client_job_id)
                     retry += retry_candidates(db, g)
                     log(
-                        db, f"Download failed: '{g.release_title}' ({st.message})", kind="grab", level="error"
+                        db,
+                        f"Download failed: '{g.release_title}' ({st.message})",
+                        kind="grab",
+                        level="error",
+                        issue_id=g.issue_id,
+                        series_id=g.series_id,
                     )
                     db.commit()
                     changed += 1

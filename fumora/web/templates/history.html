@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}History · Fumora{% endblock %}
+{% block content %}
+<h1>History{% if series %}: <a href="/series/{{ series.id }}">{{ series.name }}</a>{% endif %}</h1>
+<p><a href="/queue">Queue</a> · <a href="/blocklist">Blocklist</a></p>
+<form class="row" method="get" action="/history">
+  {% if series %}<input type="hidden" name="series_id" value="{{ series.id }}">{% endif %}
+  <label>What <select name="kind"><option value="">everything</option>{% for k in kinds %}<option {% if k == kind %}selected{% endif %}>{{ k }}</option>{% endfor %}</select></label>
+  <label>Level <select name="level"><option value="">all</option>{% for l in levels %}<option {% if l == level %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+  <button class="secondary">Show</button>
+</form>
+<p class="muted small">{{ total }} events{% if pages > 1 %} · page {{ page }} of {{ pages }}{% endif %}</p>
+{% with show_series=True %}{% include "_history_table.html" %}{% endwith %}
+{% if pages > 1 %}
+<p class="row">
+  {% set base = "/history?kind=" ~ kind ~ "&level=" ~ level ~ ("&series_id=" ~ series.id if series else "") %}
+  {% if page > 1 %}<a href="{{ base }}&page={{ page - 1 }}">← Newer</a>{% endif %}
+  {% if page < pages %}<a href="{{ base }}&page={{ page + 1 }}">Older →</a>{% endif %}
+</p>
+{% endif %}
+{% endblock %}

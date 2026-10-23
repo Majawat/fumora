@@ -155,5 +155,10 @@
   </tbody>
 </table>
 </div>
+<details class="card">
+  <summary><h2 style="display:inline">History</h2></summary>
+  {% with events=history, show_series=False %}{% include "_history_table.html" %}{% endwith %}
+  <p><a href="/history?series_id={{ s.id }}">All of it</a></p>
+</details>
 <p><a class="error" href="/series/{{ s.id }}/delete">Delete this series…</a></p>
 {% endblock %}
