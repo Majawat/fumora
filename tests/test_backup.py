@@ -168,3 +168,19 @@ def test_backups_are_one_self_contained_file(app, config, tmp_path):
     assert sqlite3.connect(made).execute("PRAGMA journal_mode").fetchone()[0] == "delete"
     create_app(config)
     assert not list(config.config_dir.glob("restore-pending*"))
+
+
+def test_restore_replaces_a_damaged_database(app, config):
+    # Gemini review of #34: backing up a damaged database first failed, so start-up
+    # crashed and the restore (the way out) was never applied.
+    _add(app, "Saga")
+    good = backup.make_backup(config.db_path, backup.backup_dir(config.config_dir), "manual")
+    backup.stage_restore(config.config_dir, good)
+    app.state.session_factory.kw["bind"].dispose()
+    for side in ("-wal", "-shm"):
+        config.db_path.with_name(config.db_path.name + side).unlink(missing_ok=True)
+    config.db_path.write_bytes(b"SQLite format 3\x00" + b"\xff" * 8000)  # damaged
+    again = create_app(config)
+    assert _names(again) == ["Saga"]
+    pre = [b for b in backup.list_backups(backup.backup_dir(config.config_dir)) if b.label == "pre-restore"]
+    assert len(pre) == 1 and pre[0].path.read_bytes().startswith(b"SQLite format 3")

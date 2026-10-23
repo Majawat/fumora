@@ -156,3 +156,13 @@ def test_year_in_the_name_and_linking_once_after_the_upgrade(app, config):
     third = create_app(config)
     with third.state.session_factory() as db:
         assert db.get(Series, ids[0]).parent_id is None
+
+
+def test_link_works_before_the_annual_is_saved(app):
+    # Gemini review of #34: an unsaved annual (id None) next to a parent with no parent
+    # compared None == None and was refused as "its own annual".
+    with app.state.session_factory() as db:
+        p = _s(db, "Saga", 2012)
+        a = Series(name="Saga Annual", locked_fields=[])
+        annuals.link(a, p)
+        assert a.parent_id == p.id

@@ -172,7 +172,19 @@ def apply_pending_restore(config_dir: Path, db_path: Path) -> str | None:
         return f"Restore not applied: {exc} (kept as {bad.name})"
     saved = None
     if db_path.exists():
-        saved = make_backup(db_path, backup_dir(config_dir), "pre-restore")
+        try:
+            saved = make_backup(db_path, backup_dir(config_dir), "pre-restore")
+        except (sqlite3.Error, OSError):
+            # A damaged database (often why one restores) can't be backed up the SQLite way:
+            # keep its files as they are instead, and restore anyway.
+            folder = backup_dir(config_dir)
+            folder.mkdir(parents=True, exist_ok=True)
+            saved = _new_path(folder, "pre-restore")
+            shutil.copyfile(db_path, saved)
+            normalize(saved)
+            for side in ("-wal", "-shm"):
+                if (f := db_path.with_name(db_path.name + side)).exists():
+                    shutil.copyfile(f, saved.with_name(saved.name + side))
     for base in (db_path, pending):
         for f in (base.with_name(base.name + "-wal"), base.with_name(base.name + "-shm")):
             f.unlink(missing_ok=True)

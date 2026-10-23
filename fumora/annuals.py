@@ -81,7 +81,9 @@ def guess_parent(db: Session, series: Series) -> Series | None:
 def link(series: Series, parent: Series | None) -> None:
     """Make `series` belong to `parent` (None: to nothing). A series with no files yet
     moves into the parent's folder; one with files keeps its folder (Organize moves it)."""
-    if parent is not None and (parent.id == series.id or parent.parent_id == series.id):
+    if parent is not None and (
+        parent is series or (series.id is not None and series.id in (parent.id, parent.parent_id))
+    ):
         raise ValueError("A series can't belong to itself or to its own annual")
     series.parent_id = parent.id if parent is not None else None
     if parent is not None and parent.path and not any(i.files for i in series.issues):
