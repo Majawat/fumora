@@ -33,7 +33,7 @@ Jinja2 + htmx. Image: `ghcr.io/majawat/fumora:edge` (built from `main`).
 | M5c: full tags at import (#24: Metron or ComicVine issue record first), Import files page (manual import), permissions, version 0.5.0 | merged 2026-10-21, tagged v0.5.0 | #29 |
 | 0.5.1: fixes from the full Gemini audit of v0.5.0 (41 real findings) + verification pass | merged 2026-10-22, tagged v0.5.1 | #30 |
 | 0.5.2: parser packs of volumes / year volumes / variants (#16), downloads converted straight into the library (#31), live Shelfmark test fixes (#7) | merged 2026-10-23, tagged v0.5.2 | #33 |
-| 0.6.0 Sonarr/Mylar parity: delete series + optional recycle folder, History, Blocklist, database backups/restore, RSS sync, annuals linked to their series, story arcs as reading lists (.cbl) | open | #34 |
+| 0.6.0 Sonarr/Mylar parity: delete series + optional recycle folder, History, Blocklist, database backups/restore, RSS sync, annuals linked to their series, story arcs as reading lists (.cbl) + release-name parser rules (live workflow, Mylar comparison, local-model labelling) | merged 2026-10-23, tagged v0.6.0 | #34 |
 | M5 rest: TPBs (a TPB is its own series, grabbed only when that series is added and monitored; never counts as the single issues it collects), GCD ratings via the GCD API (needs the owner's GCD account), manual series, split/join, notifications (back burner) | not started | — |
 | M6 side-by-side week with Mylar, cut over (1.0.0) | not started | — |
 | Back burner (owner, 2026-10-23): bulk series editor, quality upgrades (scan -> digital), API with a key (e.g. for Requinsta), Logs page, notifications, ISBN search for TPBs | — | — |
