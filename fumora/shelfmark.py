@@ -36,6 +36,20 @@ def _bytes(size: str | None) -> int | None:
         return None
 
 
+def _named_with(name: str, number: str, issue: str, fname: str) -> bool:
+    """Does the file name carry `number` as part of the series name ("Big Hero 6 04" for
+    "Big Hero", "6", issue 4)? Where it equals the issue number it only counts if another
+    number follows ("Big Hero 6 01" for "Big Hero 6", "1", issue 1 is just the issue)."""
+    words = re.findall(r"[a-z0-9]+", name.lower())
+    if not words:
+        return False
+    sep = r"[\W_]+"
+    pattern = r"(?<![a-z0-9])" + sep.join(map(re.escape, [*words, str(int(number))])) + r"(?!\d)"
+    if str(int(number)) == issue:
+        pattern += r"[\s_.-]+\d{1,3}(?!\d)"  # another number, not a year in brackets
+    return re.search(pattern, re.sub(r"(?<![0-9])0+(?=\d)", "", fname.lower())) is not None
+
+
 def clean_libgen_title(title: str) -> str:
     """Libgen comics titles are catalogue data, then ' c c <id> ', then the file name:
     'Black Hole #1 1995-mar 1 Biology 101 c c 1013165 Black Hole 01 (Charles Burns) 1024x1569px 300dpi'.
@@ -48,6 +62,13 @@ def clean_libgen_title(title: str) -> str:
     if not m:
         return title
     meta, fname = m.group("meta"), m.group("file")
+    # The catalogue may write the volume before the issue: "Walking Dead (The) 1 #100" is
+    # volume 1 of The Walking Dead, while "Big Hero 6 #4" is the series Big Hero 6. The file
+    # name decides: "Big Hero 6 04 (of 5)" carries the number in the name, "The Walking Dead
+    # 100" doesn't.
+    vm = re.match(r"^(.*?\S)\s(\d{1,2})\s#\s?(\d+)", meta)
+    if vm and not _named_with(vm.group(1), vm.group(2), str(int(vm.group(3))), fname):
+        meta = f"{vm.group(1)} v{vm.group(2)} {meta[vm.start(3) - 1 :].lstrip()}"
     year = re.search(r"\b((?:19|20)\d{2})-[a-z]{3}\b", meta)
     head = re.match(r"^(.*?#\s?[\d.]+)", meta)
     base = head.group(1) if head else re.sub(r"\s*\b\d{10,13}\b;?", "", meta).strip()

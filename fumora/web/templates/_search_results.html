@@ -7,7 +7,7 @@
   <tbody>
   {% for c in accepted %}
   <tr class="{{ 'best' if loop.first else '' }}">
-    <td>{{ c.parsed.title }}<small class="muted why">{{ c.release.indexer }} · {{ c.protocol }}{% if c.protocol == "torrent" %} · {{ c.release.seeders }} seeders{% endif %}{% if c.parsed.kind == "range" %} · pack {{ c.parsed.range_start }}–{{ c.parsed.range_end }}{% endif %}</small></td>
+    <td>{{ c.parsed.title }}<small class="muted why">{{ c.release.indexer }} · {{ c.protocol }}{% if c.protocol == "torrent" %} · {{ c.release.seeders }} seeders{% endif %}{% if c.parsed.kind == "range" %} · pack {{ c.parsed.range_start }}–{{ c.parsed.range_end }}{% elif c.parsed.kind == "volumes" %} · pack of volumes {{ c.parsed.range_start }}–{{ c.parsed.range_end }}{% endif %}</small></td>
     <td>{{ c.parsed.source }}{% if c.parsed.group %}<small class="muted why">{{ c.parsed.group }}</small>{% endif %}</td>
     <td>{{ "%.0f"|format(c.size_mb) }} MB</td>
     <td>{{ c.age_days if c.age_days is not none else "" }}{% if c.age_days is not none %} d{% endif %}</td>

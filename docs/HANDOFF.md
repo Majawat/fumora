@@ -32,6 +32,7 @@ Jinja2 + htmx. Image: `ghcr.io/majawat/fumora:edge` (built from `main`).
 | M5b other sources: ComicVine refresh, move to Metron, add from ComicVine, reading direction, Metron gaps page | merged 2026-10-20 | #28 |
 | M5c: full tags at import (#24: Metron or ComicVine issue record first), Import files page (manual import), permissions, version 0.5.0 | merged 2026-10-21, tagged v0.5.0 | #29 |
 | 0.5.1: fixes from the full Gemini audit of v0.5.0 (41 real findings) + verification pass | merged 2026-10-22, tagged v0.5.1 | #30 |
+| 0.5.2: parser packs of volumes / year volumes / variants (#16), downloads converted straight into the library (#31), live Shelfmark test fixes (#7) | open | #33 |
 | M5 rest: TPB fallback (TPB = own series; grab only when single issues aren't available), GCD ratings via the GCD API (needs the owner's GCD account), manual series, split/join, notifications (back burner) | not started | — |
 | M6 side-by-side week with Mylar, cut over | not started | — |
 
@@ -127,6 +128,18 @@ Jinja2 + htmx. Image: `ghcr.io/majawat/fumora:edge` (built from `main`).
   owner removed the bad `annas-archive.is` mirror; AA's search now answers with a
   DDoS-Guard CAPTCHA no bypasser can solve (byparr update didn't help; Shelfmark
   has no manual cookie import). Owner turned Shelfmark's Libgen search on: works.
+- **Live Shelfmark test 2026-10-22 (#7):** the owner switched Shelfmark to its internal
+  CAPTCHA solver; Anna's Archive search answers again (9-42 s a query, Libgen 1-8 s).
+  AA is book-centric: generic queries ("Saga 1", "Watchmen") return mostly EPUB novels
+  (rejected by the parser), exact comic names work ("Absolute Batman #6 (2025).cbz",
+  "Absolute Batman Vol. 1: The Zoo (2025).cbz"). ISBN queries work on AA (Watchmen
+  9781401245252 found CBR copies), not on Libgen. Libgen is the better single-issue
+  source. A real download (AA release, fetched by Shelfmark from its fast Libgen mirror,
+  65 s) landed as `/data/Shelfmark/Scott Snyder - Absolute Batman #6 (2025).cbz`, 644
+  (Fumora normalizes on import); test file removed. The slow AA path (CAPTCHA) was not
+  exercised. No AA member key is set (`AA_DONATOR_KEY` empty; Shelfmark supports one).
+  Fixed from it: Libgen's "Walking Dead (The) 1 #100" (volume before issue), cover-only
+  files, language from bracket tags. Not done: ISBN search for collected editions.
 
 ### Where M5b (other sources) stands
 
@@ -248,9 +261,8 @@ Production DB backups before migrations:
 
 ## Open issues worth knowing
 
-- #5 does a TPB satisfy single issues (M5) · #7 Shelfmark test for Anna's
-  Archive (M5; see "Where M5a stands": Shelfmark's AA search is broken) · #8 expose externally? · #14 Metron gaps / contribution helper
-  · #16 parser (part done in M4 part 1).
+- #8 expose externally? · #14 Metron gaps / contribution helper. (#5 decided: a TPB is its own
+  series and never counts as single issues; #7, #16, #31 done in 0.5.2.)
 - Not built yet from the M3 plan: one Fumora series spanning several Metron
   series (Uncle Scrooge), Metron pull-list sync (see #19 comments).
 

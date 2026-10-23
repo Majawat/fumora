@@ -10,6 +10,7 @@ from fumora import settings_store
 from fumora.auto_search import make_search_handler
 from fumora.grabbing import APPROVAL, active_grab
 from fumora.models import Blocklist, Grab, Issue, Series
+from fumora.releases import matches_issue, parse_release
 from fumora.search import Profile, evaluate, language_code, load_profile, rank
 from fumora.shelfmark import clean_libgen_title, to_release
 from tests.test_ddl_sources import SM, _gc_settings
@@ -361,3 +362,46 @@ def test_numbering_can_be_set_by_hand(app, logged_in):
 def test_libgen_folder_paths_are_dropped():
     raw = r"Yen.Press.-.Mieruko.Chan.Vol.12.2026.Retail.Comic.eBook-BitBook s:\scene\2026-04\Yen"
     assert clean_libgen_title(raw) == "Yen.Press.-.Mieruko.Chan.Vol.12.2026.Retail.Comic.eBook-BitBook"
+
+
+# --- #7: what the live Shelfmark test (2026-10-22) found ------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw", "series", "number"),
+    [
+        # Real Shelfmark/Libgen rows (2026-10-22): the catalogue's volume before "#" ...
+        ("Walking Dead (The) 1 #100 c c 57990 The Walking Dead 100 [Image] (2012) (Digital) (Zone-Empire) "
+         "1280x1968px 300dpi", "Walking Dead", "100"),
+        ("Superman: Batman 1 #14 2005-jan Absolute Power 1 c c 168861 Superman-Batman 14 - "
+         "Absolute Power 1of5 (2004) (Bchry-DCP)", "Superman: Batman", "14"),
+        ("Big Hero 6 1 #1 2008-nov c c 205726 Big Hero 6 01 (2008) (Minutemen-ReZone) 1280x1996px 400dpi",
+         "Big Hero 6", "1"),
+        ("Wild Times: Gen 13 1 #1 1999-aug c c 58928 Wild Times - Gen 13 001 (1999) 26p 1024x1591px 150dpi",
+         "Wild Times: Gen 13", "1"),
+        # ... and a series whose name ends in a number, with no volume (the file name shows it).
+        ("Big Hero 6 #4 c c 1011552 Big Hero 6 04 (of 5) (2009) (noads) (Link-DCP) 1280x1968px 300dpi",
+         "Big Hero 6", "4"),
+        ("Top 10 #1 (1999).cbr", "Top 10", "1"),
+        ("Black Hole #1 (1995).cbr", "Black Hole", "1"),
+    ],
+)  # fmt: skip
+def test_libgen_volume_before_the_issue_is_not_part_of_the_name(raw, series, number):
+    r = parse_release(clean_libgen_title(raw))
+    assert (r.series, r.kind, r.number) == (series, "issue", number)
+    assert matches_issue(r, [series], number, ())
+
+
+def test_a_cover_only_file_is_not_the_issue():
+    s = Series(name="The Walking Dead", year_began=2003, series_type="Single Issue")
+    issue = Issue(series=s, number="100")
+    title = "Walking Dead (The) v1 #100 (2012) (Cover B - Marc Silvestri Variant) (Cover ONLY) (ScanDog).cbr"
+    c = evaluate({"title": title, "size": 8 * 2**20, "protocol": "ddl"}, issue, Profile())
+    assert "only the cover" in c.rejections
+
+
+def test_language_from_a_bracket_tag_but_not_from_a_name():
+    assert parse_release("Walking Dead (The) v1 #100 (rus).cbz").language == "ru"
+    assert parse_release("Batman Poche #50 (1984) (Comics Fr).cbr").language == "fr"
+    # A creator named outside "by ..." (which the parser drops) is no language.
+    assert parse_release("The Walking Dead 100 Rus Wooton (2012) (Digital)").language == "en"
