@@ -1,4 +1,5 @@
-"""blocklist: series/issue links; event: indexes for History, series filled in from the issue
+"""blocklist: series/issue links; event: indexes for History, series filled in from the issue;
+series.parent_id (annuals and specials belong to their main series)
 
 Revision ID: 0011
 Revises: 0010
@@ -20,6 +21,10 @@ def upgrade() -> None:
         batch_op.add_column(sa.Column('issue_id', sa.Integer(), nullable=True))
         batch_op.create_foreign_key('fk_blocklist_series_id_series', 'series', ['series_id'], ['id'], ondelete='SET NULL')
         batch_op.create_foreign_key('fk_blocklist_issue_id_issue', 'issue', ['issue_id'], ['id'], ondelete='SET NULL')
+    with op.batch_alter_table('series', schema=None) as batch_op:
+        batch_op.add_column(sa.Column('parent_id', sa.Integer(), nullable=True))
+        batch_op.create_index('ix_series_parent_id', ['parent_id'], unique=False)
+        batch_op.create_foreign_key('fk_series_parent_id_series', 'series', ['parent_id'], ['id'], ondelete='SET NULL')
     with op.batch_alter_table('event', schema=None) as batch_op:
         batch_op.create_index('ix_event_series_id', ['series_id'], unique=False)
         batch_op.create_index('ix_event_issue_id', ['issue_id'], unique=False)
@@ -31,6 +36,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    with op.batch_alter_table('series', schema=None) as batch_op:
+        batch_op.drop_constraint('fk_series_parent_id_series', type_='foreignkey')
+        batch_op.drop_index('ix_series_parent_id')
+        batch_op.drop_column('parent_id')
     with op.batch_alter_table('event', schema=None) as batch_op:
         batch_op.drop_index('ix_event_issue_id')
         batch_op.drop_index('ix_event_series_id')

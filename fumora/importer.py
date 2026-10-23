@@ -119,6 +119,15 @@ def upsert_mylar(
                 else:
                     stats.files_missing += 1
     db.flush()
+    # Mylar's annuals belong to their series: keep that link (unless set by hand since).
+    for ms in mylar_series:
+        if ms.parent_cv_id is None:
+            continue
+        annual = db.scalar(select(Series).where(Series.cv_id == ms.cv_id))
+        parent = db.scalar(select(Series).where(Series.cv_id == ms.parent_cv_id))
+        if annual is not None and parent is not None and annual.parent_id is None and annual.id != parent.id:
+            annual.parent_id = parent.id
+    db.flush()
     return stats
 
 

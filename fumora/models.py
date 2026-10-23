@@ -94,6 +94,9 @@ class Series(Base):
     year_end: Mapped[int | None]
     # Metron series_type name: Single Issue, Trade Paperback, Annual, ...
     series_type: Mapped[str | None] = mapped_column(String(50))
+    # An annual or special belongs to its main series (Mylar folds them in; on Metron and
+    # ComicVine they are series of their own). See annuals.py.
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("series.id", ondelete="SET NULL"), index=True)
     status: Mapped[str | None] = mapped_column(String(50))
     desc: Mapped[str | None] = mapped_column(Text)
     genres: Mapped[list | None] = mapped_column(JSON)
@@ -168,6 +171,8 @@ class Series(Base):
 
     issues: Mapped[list["Issue"]] = relationship(back_populates="series", cascade="all, delete-orphan")
     tags: Mapped[list[Tag]] = relationship(secondary=series_tag)
+    parent: Mapped["Series | None"] = relationship(remote_side=[id], back_populates="children")
+    children: Mapped[list["Series"]] = relationship(back_populates="parent", passive_deletes=True)
 
 
 class Issue(Base):

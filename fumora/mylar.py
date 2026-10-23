@@ -45,6 +45,7 @@ class MylarSeries:
     mylar_type: str | None
     age_rating: str | None  # Metron vocabulary
     is_annual: bool = False
+    parent_cv_id: int | None = None  # an annual's main series
     issues: list[MylarIssue] = field(default_factory=list)
 
 
@@ -182,6 +183,7 @@ def read_mylar(db_path: Path) -> list[MylarSeries]:
                     mylar_type="Annual",
                     age_rating=parent.age_rating,
                     is_annual=True,
+                    parent_cv_id=parent.cv_id,
                 )
             path = _file_path(parent.path, row["Location"])
             series.issues.append(

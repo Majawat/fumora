@@ -19,6 +19,16 @@
     <small>Wanted = monitored, released, and no file. "Fill gaps" monitors missing issues between the first and last you have. If the folder already exists, its files are linked first, so "Missing" and "Fill gaps" know what you have.</small>
   </label>
   <label class="inline"><input type="checkbox" name="monitor_new" value="true" checked> Monitor new issues as Metron adds them</label>
+  {% if annuals %}
+  <fieldset>
+    <legend>Its annuals and specials on Metron</legend>
+    <p class="muted small">Added with it, in its folder, with the same monitoring (as Mylar does). Each stays a series of its own on Metron.</p>
+    {% for a in annuals %}
+    <label class="inline"><input type="checkbox" name="annual_ids" value="{{ a.id }}" checked> {{ a.series or a.name }}{% if a.issue_count %} <small class="muted">({{ a.issue_count }} issues)</small>{% endif %}</label>
+    {% endfor %}
+  </fieldset>
+  {% elif annuals_error %}<p class="muted small">{{ annuals_error }}</p>
+  {% endif %}
   <p><button>Add series</button></p>
 </form>
 {% endblock %}

@@ -2,6 +2,7 @@
 
 from datetime import date, timedelta
 from itertools import groupby
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -9,7 +10,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from .. import monitoring, settings_store
+from .. import annuals, monitoring, settings_store
 from ..catalog import add_series, folder_for
 from ..comicvine import ComicVineError, start_year
 from ..metron import MetronError
@@ -219,8 +220,17 @@ def register_catalog_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
             volume=detail.get("volume"),
             publisher=Publisher(name=pub) if pub else None,
         )
+        extra, extra_error = [], None
+        if not annuals.is_annual(preview):
+            try:
+                async with _client(db) as client:
+                    extra = await annuals.metron_annuals(client, db, detail)
+            except MetronError as exc:  # the series can still be added; say why none are offered
+                extra_error = f"Couldn't look for its annuals on Metron: {exc}"
         return templates.TemplateResponse(
-            request, "add_form.html", {"d": detail, "folder": folder_for(db, preview)}
+            request,
+            "add_form.html",
+            {"d": detail, "folder": folder_for(db, preview), "annuals": extra, "annuals_error": extra_error},
         )
 
     @app.post("/add/{metron_id}")
@@ -228,6 +238,7 @@ def register_catalog_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
         metron_id: int,
         option: str = Form("future"),
         monitor_new: bool = Form(False),
+        annual_ids: Annotated[list[int], Form()] = (),
         db: Session = Depends(get_db),
     ):
         if option not in monitoring.OPTIONS:
@@ -235,6 +246,9 @@ def register_catalog_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
         try:
             async with _client(db) as client:
                 series = await add_series(db, client, metron_id, option, monitor_new)
+                for aid in dict.fromkeys(annual_ids):
+                    if aid != metron_id:
+                        await add_series(db, client, aid, option, monitor_new, parent=series)
             db.commit()
         except MetronError as exc:
             db.rollback()

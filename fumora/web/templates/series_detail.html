@@ -5,6 +5,8 @@
 <p><a href="/series">← Series</a></p>
 <h1>{{ s.name }}{% if s.year_began %} ({{ s.year_began }}){% endif %}</h1>
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
+{% if s.parent %}<p class="muted">Annual/special of <a href="/series/{{ s.parent.id }}">{{ s.parent.name }}{% if s.parent.year_began %} ({{ s.parent.year_began }}){% endif %}</a></p>{% endif %}
+{% if children %}<p class="muted">Annuals and specials: {% for c in children %}<a href="/series/{{ c.id }}">{{ c.name }}{% if c.year_began %} ({{ c.year_began }}){% endif %}</a>{{ ", " if not loop.last }}{% endfor %}</p>{% endif %}
 
 {% if s.match_status == "matched" and not s.confirmed_by %}
 <section class="card attention">
@@ -160,5 +162,18 @@
   {% with events=history, show_series=False %}{% include "_history_table.html" %}{% endwith %}
   <p><a href="/history?series_id={{ s.id }}">All of it</a></p>
 </details>
+{% if not children %}
+<form class="card row" method="post" action="/series/{{ s.id }}/parent">
+  <label>Annual or special of
+    <select name="parent_id">
+      <option value="">no other series</option>
+      {% if s.parent and s.parent not in parent_options %}<option value="{{ s.parent.id }}" selected>{{ s.parent.name }}{% if s.parent.year_began %} ({{ s.parent.year_began }}){% endif %}</option>{% endif %}
+      {% for p in parent_options %}<option value="{{ p.id }}" {% if s.parent_id == p.id %}selected{% endif %}>{{ p.name }}{% if p.year_began %} ({{ p.year_began }}){% endif %}</option>{% endfor %}
+    </select>
+    <small>Listed on that series' page; a series without files yet moves into its folder.</small>
+  </label>
+  <button class="secondary">Save</button>
+</form>
+{% endif %}
 <p><a class="error" href="/series/{{ s.id }}/delete">Delete this series…</a></p>
 {% endblock %}

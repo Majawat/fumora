@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, selectinload
 
-from .. import naming, settings_store
+from .. import annuals, naming, settings_store
 from ..import_job import KIND as MYLAR_IMPORT
 from ..importer import (
     apply_metron_series,
@@ -104,6 +104,8 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
             "plan": plan,
             "writable": series.writable,
             "history": recent_history(db, 25, series_id=series.id),
+            "children": sorted(series.children, key=lambda c: (c.year_began or 0, c.name)),
+            "parent_options": annuals.parent_candidates(db, series)[:30] if not series.children else [],
         }
 
     @app.get("/series/{series_id}", response_class=HTMLResponse)
@@ -169,6 +171,25 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
                 db.add(tag)
             new_tags.append(tag)
         series.tags = new_tags
+        db.commit()
+        return RedirectResponse(f"/series/{series_id}", status_code=303)
+
+    @app.post("/series/{series_id}/parent")
+    def series_parent(series_id: int, parent_id: str = Form(""), db: Session = Depends(get_db)):
+        series = _get_series(db, series_id)
+        parent = _get_series(db, int(parent_id)) if parent_id.strip().isdigit() else None
+        try:
+            annuals.link(series, parent)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        log(
+            db,
+            f"'{series.name}' now belongs to '{parent.name}'"
+            if parent
+            else f"'{series.name}' belongs to no series",
+            kind="series",
+            series_id=series.id,
+        )
         db.commit()
         return RedirectResponse(f"/series/{series_id}", status_code=303)
 
