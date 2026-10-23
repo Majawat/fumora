@@ -125,3 +125,24 @@ def test_rss_now_button(app, logged_in):
         db.add(Job(kind="search", state="running"))
         db.commit()
     assert logged_in.post("/wanted/rss").status_code == 409
+
+
+async def test_a_failing_scheduled_backup_is_reported_once_an_hour(app, monkeypatch):
+    import asyncio
+
+    from fumora import scheduler
+    from fumora.models import Event
+
+    def broken(*a, **k):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(scheduler.backup, "make_backup", broken)
+    for _ in range(3):  # three scheduler passes in a row
+        task = asyncio.create_task(
+            scheduler.run_scheduler(app.state.session_factory, _Jobs(), check_every=3600)
+        )
+        await asyncio.sleep(0.2)
+        task.cancel()
+    with app.state.session_factory() as db:
+        errors = db.scalars(select(Event.message).where(Event.kind == "backup", Event.level == "error")).all()
+    assert len(errors) == 1 and "No space left" in errors[0]

@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import random
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from . import backup, settings_store
@@ -16,6 +16,7 @@ from .sources import CV_REFRESH
 
 log = logging.getLogger("fumora.scheduler")
 CHECK_EVERY = 300  # seconds
+BACKUP_RETRY = timedelta(hours=1)  # after a failed scheduled backup
 
 
 _FIRST_PICK = {
@@ -163,15 +164,19 @@ async def run_scheduler(session_factory, jobs, check_every: int = CHECK_EVERY) -
                     db.commit()
                     jobs.start(CV_REFRESH, {})
                     log.info("scheduled ComicVine refresh started")
+                failed = settings_store.get_state(db, "schedule.backup.failed")
                 if backup_due(
                     now,
                     settings_store.get(db, "backup.interval_days"),
                     settings_store.get_state(db, "schedule.backup.last"),
-                ):
+                ) and not (failed and now - datetime.fromisoformat(failed) < BACKUP_RETRY):
                     try:
                         await scheduled_backup(db, now)
-                    except Exception as exc:  # said out loud, retried next check
+                        settings_store.put_state(db, "schedule.backup.failed", None)
+                        db.commit()
+                    except Exception as exc:  # said out loud, tried again an hour later
                         db.rollback()
+                        settings_store.put_state(db, "schedule.backup.failed", now.isoformat())
                         db.add(Event(kind="backup", level="error", message=f"Scheduled backup failed: {exc}"))
                         db.commit()
                         log.exception("scheduled backup failed")
