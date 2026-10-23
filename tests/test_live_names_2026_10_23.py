@@ -67,3 +67,24 @@ def test_a_tpb_tagged_release_never_satisfies_a_single_issue():
     assert not matches_issue(
         parse_release("The Magic Order 3 (TPB) (2023)"), ["The Magic Order"], "3", (2023,)
     )
+
+
+# --- Found by labelling 3,450 hard titles with a local model (qwen3:14b) ---------------------
+
+
+def test_accents_fold_to_plain_letters():
+    from fumora.releases import series_key
+
+    assert series_key("Le Bateau de Thésée") == series_key("Le Bateau de Thesee")
+    assert matches_issue(parse_release("Bludwire 001 (2026) (Digital)"), ["Blüdwire"], "1", (2026,))
+
+
+def test_issue_number_in_brackets_and_lists_of_volumes():
+    r = parse_release("G.I. Joe: A Real American Hero - Saturday Morning Adventures (#01) (2022) (digital)")
+    assert (r.kind, r.number) == ("issue", "1")
+    r = parse_release("Amazing Spider-Man: Epic Collection Vol. 1,2,5,8,9,15,23,24,25,27 [ENG / CBR]")
+    assert (r.series, r.kind, r.number) == ("Amazing Spider-Man: Epic Collection", "unknown", None)
+    assert (
+        parse_release("Hellboy in Love  Black Eyes (2026) (digital) Torrent").series
+        == "Hellboy in Love Black Eyes"
+    )

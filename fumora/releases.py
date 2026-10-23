@@ -15,6 +15,7 @@ Variant-cover markers don't make a separate issue.
 
 import html
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -111,7 +112,9 @@ def _pick_issue(matches: list[re.Match]) -> re.Match:
 
 
 def series_key(name: str | None) -> str:
-    s = html.unescape(name or "").lower().replace("&", "and")
+    # Accents fold to plain letters: "Thésée" (Metron) and "Thesee" (a release) are one name.
+    s = unicodedata.normalize("NFKD", html.unescape(name or "")).encode("ascii", "ignore").decode()
+    s = s.lower().replace("&", "and")
     # Dots/underscores count as spaces here, so "The.Walking.Dead" keys like "The Walking Dead"
     # whether or not the title was de-dotted.
     s = re.sub(r"[._]+", " ", s)
@@ -179,6 +182,7 @@ def parse_release(title: str) -> ParsedRelease:
     tags = re.findall(r"[\[(]([^\])]*)[\])]", text)
     r.tags = [t.strip() for t in tags if t.strip()]
     body = re.sub(r"[\[(][^\])]*[\])]", " ", text)
+    tag_issue = None
     for tag in r.tags:
         t = tag.lower()
         if _YEAR.match(t) and r.year is None:
@@ -194,6 +198,8 @@ def parse_release(title: str) -> ParsedRelease:
             r.group = tag.strip()
         if re.search(r"\b(\d+\s*covers?|variant|virgin|cover [a-z]|1:\d+)\b", t):
             r.variant = True
+        if (hm := re.fullmatch(r"#\s?(\d{1,4}(?:\.\d+)?)", t.strip())) and tag_issue is None:
+            tag_issue = hm.group(1)  # "Saturday Morning Adventures (#01) (2022)"
         rm = re.match(r"^#?(\d{1,4})\s?-\s?#?(\d{1,4})(?:\s?\+.*)?$", t)  # "(001-046+Extras)"
         if (
             rm
@@ -242,7 +248,12 @@ def parse_release(title: str) -> ParsedRelease:
 
     # Strip trailing junk words, years, extensions.
     body = re.sub(r"\.(cbz|cbr|cb7|zip|rar|pdf|epub)$", "", body.strip(), flags=re.I)
-    body = re.sub(r"\b(ongoing|complete|fcbd)\b", " ", body, flags=re.I)
+    body = re.sub(r"\b(ongoing|complete|fcbd|torrent)\b", " ", body, flags=re.I)
+    # "Epic Collection Vol. 1,2,5,8": a list of volumes, not issue #2; left unmatched.
+    if re.search(r"(?i)\bvol(?:ume)?s?\.?\s*\d{1,3}\s*,\s*\d", body):
+        r.kind = "unknown"
+        r.series = re.sub(r"(?i)\s*\bvol(?:ume)?s?\.?\s*\d.*$", "", body).strip(" -_.,")
+        return r
 
     # Variant covers in the name ("001 Cover B", "001 Jim Lee Variant", "1 1:25") are the
     # same issue; only flagged. The ratio is no issue number ("Batman 1 1:25" is #1).
@@ -296,6 +307,8 @@ def parse_release(title: str) -> ParsedRelease:
         for m in _ISSUE.finditer(body):  # a plausible year in the body
             if len(m.group(1)) == 4 and _plausible_year(m.group(1)) and r.year is None:
                 r.year = int(m.group(1))
+    if head is None and r.kind == "unknown" and tag_issue is not None:
+        r.kind, r.number = "issue", normalize_number(tag_issue)
     if r.year is None:
         y = re.search(r"(?<!\d)(19[5-9]\d|20[0-4]\d)(?!\d)", body)
         if y:
