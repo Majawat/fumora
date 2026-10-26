@@ -1,7 +1,10 @@
 """Running behind a reverse proxy (#8): CSRF guard, Secure cookie, login limit, proxy notice."""
 
+import httpx
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from fumora.models import Event
 from fumora.web_security import LoginLimiter, cross_origin_reason
@@ -36,6 +39,9 @@ def test_cross_origin_rules():
     assert cross_origin_reason(_scope(scheme="https", host="comics.example.com:443", origin=site)) is None
     # No browser headers at all: not a browser, nothing to forge.
     assert cross_origin_reason(_scope()) is None
+    # Malformed headers are refused, not a crash (Gemini review).
+    assert cross_origin_reason(_scope(origin="http://[::1"))
+    assert cross_origin_reason(_scope(host="[::1", origin="http://[::1]"))
 
 
 def test_cross_site_post_is_refused_and_changes_nothing(logged_in):
@@ -122,6 +128,23 @@ def test_login_locks_out_after_wrong_passwords(client, app):
         assert len(events) == 1 and "locked" in events[0].message
 
 
+def test_lockout_lasts_the_full_window_from_the_locking_failure():
+    # Gemini review: failures spread over the window used to unlock when the first one aged out.
+    now = [0.0]
+    lim = LoginLimiter(clock=lambda: now[0])
+    for t in (0, 180, 360, 540, 840):
+        now[0] = t
+        locked = lim.failed("1.2.3.4")
+    assert locked
+    now[0] = 840 + 61  # the failure at 0 is out of the window by now
+    assert lim.locked_for("1.2.3.4") > 13 * 60
+    now[0] = 840 + 15 * 60 - 1
+    assert lim.locked_for("1.2.3.4") > 0
+    now[0] = 840 + 15 * 60
+    assert lim.locked_for("1.2.3.4") == 0
+    assert lim.failed("1.2.3.4") is False  # a fresh count after the lockout
+
+
 def test_right_password_resets_the_count(client):
     client.post("/setup", data=SETUP)
     client.post("/logout")
@@ -142,6 +165,40 @@ def test_untrusted_proxy_is_reported_on_the_dashboard(logged_in):
     logged_in.get("/", headers={"X-Forwarded-Proto": "https", "X-Forwarded-For": "203.0.113.9"})
     page = logged_in.get("/").text
     assert "FUMORA_TRUSTED_PROXIES" in page and "does not trust" in page
+
+
+def _behind_proxy(app, trusted: str, peer: str) -> httpx.AsyncClient:
+    """The app wrapped in uvicorn's own proxy-header middleware, as `--forwarded-allow-ips` runs it."""
+    transport = httpx.ASGITransport(
+        app=ProxyHeadersMiddleware(app, trusted_hosts=trusted), client=(peer, 5000)
+    )
+    return httpx.AsyncClient(transport=transport, base_url="http://comics.example.com")
+
+
+FORWARDED = {"X-Forwarded-Proto": "https", "X-Forwarded-For": "203.0.113.9"}
+
+
+@pytest.mark.parametrize("trusted", ["192.168.9.5", "192.168.9.0/24"])
+async def test_trusted_proxy_gives_https_and_the_visitor_address(app, trusted):
+    async with _behind_proxy(app, trusted, "192.168.9.5") as c:
+        r = await c.post("/setup", data=SETUP, headers=FORWARDED)
+        assert "; secure" in _session_cookie(r).lower()
+        r = await c.post(
+            "/logout", headers=FORWARDED | {"Origin": "https://comics.example.com"}
+        )  # https origin matches once the proxy is believed
+        assert r.status_code == 303
+        for _ in range(5):
+            await c.post("/login", data={"username": "admin", "password": "wrong"}, headers=FORWARDED)
+    assert app.state.login_limiter.locked_for("203.0.113.9") > 0
+    assert app.state.login_limiter.locked_for("192.168.9.5") == 0
+    assert app.state.proxy_check.problem is None
+
+
+async def test_untrusted_proxy_headers_are_ignored_and_reported(app):
+    async with _behind_proxy(app, "127.0.0.1", "192.168.9.5") as c:
+        r = await c.post("/setup", data=SETUP, headers=FORWARDED)
+        assert "secure" not in _session_cookie(r).lower()
+    assert "If 192.168.9.5 is your reverse proxy" in app.state.proxy_check.problem
 
 
 def test_forwarded_proto_matching_the_scheme_is_fine(app):

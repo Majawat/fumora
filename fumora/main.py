@@ -1,6 +1,7 @@
 import asyncio
 import html
 import logging
+import math
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -241,7 +242,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     ):
         address = request.client.host if request.client else "?"
         if wait := login_limiter.locked_for(address):
-            minutes = max(1, round(wait / 60))
+            minutes = max(1, math.ceil(wait / 60))
             error = (
                 f"Too many wrong logins from {address}. Try again in {minutes} minute{'s' * (minutes != 1)}."
             )

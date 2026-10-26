@@ -31,11 +31,11 @@ def _headers(scope: Scope) -> dict[str, str]:
 
 def _origin(scheme: str, host: str) -> tuple[str, str, int | None]:
     """(scheme, hostname, port) with the default port filled in, for comparing origins."""
-    parts = urlsplit(f"{scheme}://{host}")
     try:
+        parts = urlsplit(f"{scheme}://{host}")
         port = parts.port
-    except ValueError:
-        port = None
+    except ValueError:  # malformed Host: matches no Origin
+        return scheme, "", None
     return parts.scheme, (parts.hostname or ""), port or DEFAULT_PORTS.get(parts.scheme)
 
 
@@ -54,8 +54,8 @@ def cross_origin_reason(scope: Scope) -> str | None:
         return None  # no browser sends a cross-site POST without Sec-Fetch-Site or Origin
     if origin == "null":
         return "Origin is 'null'"
-    parts = urlsplit(origin)
     try:
+        parts = urlsplit(origin)
         theirs = (parts.scheme, parts.hostname or "", parts.port or DEFAULT_PORTS.get(parts.scheme))
     except ValueError:
         return f"Origin {origin!r} is not valid"
@@ -124,11 +124,13 @@ class ProxyCheck:
         proto = proto.split(",")[0].strip().lower()
         if proto in ("http", "https") and proto != scope.get("scheme"):
             client = (scope.get("client") or ("?", 0))[0]
+            # Anyone reaching the port directly can send this header, so the notice
+            # never claims {client} is the proxy: the owner checks before trusting it.
             problem = (
-                f"A reverse proxy at {client} sends X-Forwarded-Proto: {proto}, but Fumora does not "
-                "trust it, "
-                "so it sees plain http and the proxy's address instead of the visitor's. "
-                f"Add {client} to the FUMORA_TRUSTED_PROXIES variable of the container and restart it."
+                f"{client} sent X-Forwarded-Proto: {proto}, but Fumora does not trust it as a reverse "
+                "proxy, so it sees plain http and that address instead of the visitor's. If "
+                f"{client} is your reverse proxy, add it to the FUMORA_TRUSTED_PROXIES variable of the "
+                "container and restart it; if not, something else is sending forwarded headers."
             )
             if problem != self.problem:
                 log.warning(problem)
@@ -136,13 +138,15 @@ class ProxyCheck:
 
 
 class LoginLimiter:
-    """At most `max_failures` wrong logins per address within `window` seconds."""
+    """`max_failures` wrong logins from one address within `window` seconds lock it for `window`
+    seconds, counted from the failure that locked it."""
 
     def __init__(self, max_failures: int = 5, window: float = 15 * 60, clock=time.monotonic) -> None:
         self.max_failures = max_failures
         self.window = window
         self.clock = clock
         self._failures: dict[str, deque[float]] = {}
+        self._locked_until: dict[str, float] = {}
 
     def _recent(self, address: str) -> deque[float]:
         now = self.clock()
@@ -157,17 +161,26 @@ class LoginLimiter:
 
     def locked_for(self, address: str) -> float:
         """Seconds until this address may try again (0 = it may now)."""
-        q = self._recent(address)
-        if len(q) < self.max_failures:
+        until = self._locked_until.get(address)
+        if until is None:
             return 0.0
-        return max(0.0, q[-self.max_failures] + self.window - self.clock())
+        wait = until - self.clock()
+        if wait <= 0:
+            del self._locked_until[address]
+            return 0.0
+        return wait
 
     def failed(self, address: str) -> bool:
         """Records a wrong login; True when this one locked the address out."""
         q = self._recent(address)
         q.append(self.clock())
+        if len(q) >= self.max_failures:
+            self._failures.pop(address, None)  # a fresh count after the lockout
+            self._locked_until[address] = self.clock() + self.window
+            return True
         self._failures[address] = q
-        return len(q) == self.max_failures
+        return False
 
     def succeeded(self, address: str) -> None:
         self._failures.pop(address, None)
+        self._locked_until.pop(address, None)
