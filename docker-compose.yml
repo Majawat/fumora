@@ -9,6 +9,8 @@ services:
       - PUID=99
       - PGID=100
       - UMASK=0002
+      # Reverse proxy address(es) whose X-Forwarded-* headers are believed.
+      # - FUMORA_TRUSTED_PROXIES=192.168.1.5
     volumes:
       - ./data/config:/config
       # TRaSH layout: one /data share holding usenet/, torrents/ and media/,

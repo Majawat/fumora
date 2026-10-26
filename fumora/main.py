@@ -45,10 +45,12 @@ from .web.library import register_library_routes
 from .web.library_admin import register_admin_routes
 from .web.monitor_routes import register_monitor_routes
 from .web.search_routes import register_search_routes
+from .web_security import CrossOriginGuard, LoginLimiter, ProxyCheck, SecureSessionCookie
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 log = logging.getLogger("fumora")
 PUBLIC_PATHS = ("/static/", "/login", "/setup", "/api/health")
+SESSION_COOKIE = "fumora_session"
 
 
 def create_app(config: Config | None = None) -> FastAPI:
@@ -160,8 +162,14 @@ def create_app(config: Config | None = None) -> FastAPI:
         finally:
             db.close()
 
+    proxy_check = ProxyCheck()
+    login_limiter = LoginLimiter()
+    app.state.proxy_check = proxy_check
+    app.state.login_limiter = login_limiter
+
     @app.middleware("http")
     async def require_login(request: Request, call_next):
+        proxy_check.check(request.scope)
         path = request.url.path
         if path.startswith(PUBLIC_PATHS):
             return await call_next(request)
@@ -178,10 +186,13 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.add_middleware(
         SessionMiddleware,
         secret_key=load_or_create_secret(config.secret_key_path),
-        session_cookie="fumora_session",
+        session_cookie=SESSION_COOKIE,
         same_site="lax",
         max_age=60 * 60 * 24 * 30,
     )
+    # Outermost: refuse cross-site writes before anything runs; Secure cookie over https.
+    app.add_middleware(SecureSessionCookie, cookie_name=SESSION_COOKIE)
+    app.add_middleware(CrossOriginGuard)
 
     # --- first run, login --------------------------------------------------
 
@@ -228,11 +239,29 @@ def create_app(config: Config | None = None) -> FastAPI:
         password: str = Form(...),
         db: Session = Depends(get_db),
     ):
+        address = request.client.host if request.client else "?"
+        if wait := login_limiter.locked_for(address):
+            minutes = max(1, round(wait / 60))
+            error = (
+                f"Too many wrong logins from {address}. Try again in {minutes} minute{'s' * (minutes != 1)}."
+            )
+            return templates.TemplateResponse(request, "login.html", {"error": error}, status_code=429)
         user = db.scalar(select(User).where(User.username == username.strip()))
         if user is None or not verify_password(password, user.password_hash):
+            log.warning("Wrong login for %r from %s", username.strip()[:64], address)
+            if login_limiter.failed(address):
+                message = (
+                    f"Logins from {address} locked for {round(login_limiter.window / 60)} minutes "
+                    f"after {login_limiter.max_failures} wrong passwords"
+                )
+                log.warning(message)
+                db.add(Event(kind="auth", level="warning", message=message))
+                db.commit()
             return templates.TemplateResponse(
                 request, "login.html", {"error": "Wrong username or password."}, status_code=401
             )
+        login_limiter.succeeded(address)
+        request.session.clear()
         request.session["user_id"] = user.id
         return RedirectResponse("/", status_code=303)
 
@@ -256,6 +285,8 @@ def create_app(config: Config | None = None) -> FastAPI:
         events = db.scalars(select(Event).order_by(Event.ts.desc()).limit(20)).all()
         metron_ready = settings_store.metron_ready(db)
         problems = folder_problems(db, config.config_dir)
+        if proxy_check.problem:
+            problems.append(proxy_check.problem)
         return templates.TemplateResponse(
             request,
             "dashboard.html",
