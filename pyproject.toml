@@ -1,6 +1,6 @@
 [project]
 name = "fumora"
-version = "0.6.0"
+version = "0.6.1"
 description = "Metron-first comic manager: track, download, tag and rename comics."
 license = "GPL-3.0-only"
 license-files = ["LICENSE"]

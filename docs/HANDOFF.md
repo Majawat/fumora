@@ -1,6 +1,6 @@
 # Fumora — handoff
 
-State as of 2026-10-20. Read this, `CLAUDE.md` (coding rules) and the design doc
+State as of 2026-10-26. Read this, `CLAUDE.md` (coding rules) and the design doc
 (link in `docs/DESIGN.md`) before continuing.
 
 ## What Fumora is
@@ -34,6 +34,7 @@ Jinja2 + htmx. Image: `ghcr.io/majawat/fumora:edge` (built from `main`).
 | 0.5.1: fixes from the full Gemini audit of v0.5.0 (41 real findings) + verification pass | merged 2026-10-22, tagged v0.5.1 | #30 |
 | 0.5.2: parser packs of volumes / year volumes / variants (#16), downloads converted straight into the library (#31), live Shelfmark test fixes (#7) | merged 2026-10-23, tagged v0.5.2 | #33 |
 | 0.6.0 Sonarr/Mylar parity: delete series + optional recycle folder, History, Blocklist, database backups/restore, RSS sync, annuals linked to their series, story arcs as reading lists (.cbl) + release-name parser rules (live workflow, Mylar comparison, local-model labelling) | merged 2026-10-23, tagged v0.6.0 | #34 |
+| 0.6.1 reverse proxy (#8; owner 2026-10-26: own subdomain, one admin, /setup open until the admin exists is fine): trusted proxies (`FUMORA_TRUSTED_PROXIES`), untrusted-proxy dashboard notice, cross-site request guard, Secure cookie over https, login lockout per address | branch `reverse-proxy` | — |
 | M5 rest: TPBs (a TPB is its own series, grabbed only when that series is added and monitored; never counts as the single issues it collects), GCD ratings via the GCD API (needs the owner's GCD account), manual series, split/join, notifications (back burner) | not started | — |
 | M6 side-by-side week with Mylar, cut over (1.0.0) | not started | — |
 | Back burner (owner, 2026-10-23): bulk series editor, quality upgrades (scan -> digital), API with a key (e.g. for Requinsta), Logs page, notifications, ISBN search for TPBs | — | — |
@@ -233,6 +234,22 @@ existing tests don't exist; its findings need the most checking).
 - **Story arcs** (`arcs.py`, `/arcs`): Metron arcs in reading order, matched to issues by Metron id at view
   time; monitor, add missing series (arc issues only), `.cbl` export for Komga/Kavita.
 
+## Reverse proxy (0.6.1, `web_security.py`)
+
+- uvicorn believes `X-Forwarded-*` only from `FUMORA_TRUSTED_PROXIES` (env, default 127.0.0.1, passed as
+  `--forwarded-allow-ips` in `docker/entrypoint.sh`). NPM (192.168.9.5, macvlan) reaches Hathor's ports from
+  that address (checked 2026-10-26). A proxy sending X-Forwarded-Proto that is not trusted → log + dashboard notice.
+- `CrossOriginGuard` (outermost middleware): POST etc. refused (403, reason shown) when Sec-Fetch-Site is
+  cross-site/same-site, else when Origin differs from scheme://Host. No headers = not a browser = allowed.
+  Other *.majawat.com apps count as other sites.
+- Session cookie gets `Secure` on https requests (`SecureSessionCookie`); session cleared on login.
+- `LoginLimiter`: 5 wrong passwords per address in 15 min → 429 for 15 min (in memory, reset by a restart),
+  one warning Event per lockout. NPM appends to X-Forwarded-For and uvicorn takes the right-most untrusted
+  entry, so a client cannot dodge it with its own header.
+- Live-checked on fumora-test from inside the NPM container (untrusted, then trusted). NOT done: an NPM proxy
+  host + DNS for the real subdomain (outward-facing, owner's call), and Secure-cookie/dashboard checks in a real
+  browser (no test login stored for Claude; both unit-tested).
+
 ## Version numbers
 
 `pyproject.toml` and `fumora/__init__.py` (a test keeps them equal). The minor
@@ -247,7 +264,7 @@ Files record the version in their `<Notes>` ("Tagged by Fumora 0.5.0").
 | Container | Port | Image | Notes |
 | --- | --- | --- | --- |
 | `fumora` (production) | 8792 | `ghcr.io/majawat/fumora:edge` | `/data` mounted **read-only**; scheduler on (daily Metron refresh 05:00 UTC) |
-| `fumora-test` | 8793 | local `fumora:m5c` (branch `m5c-import-tags`) | `FUMORA_SCHEDULER=0`; writable only `/data/media/comics-test` and `/data/usenet` (downloads + `fumora-test-library`) |
+| `fumora-test` | 8793 | local `fumora:proxy` (branch `reverse-proxy`), `FUMORA_TRUSTED_PROXIES=192.168.9.5` | `FUMORA_SCHEDULER=0`; writable only `/data/media/comics-test` and `/data/usenet` (downloads + `fumora-test-library`) |
 
 Unraid templates: `/boot/config/plugins/dockerMan/templates-user/my-fumora.xml`
 and `my-fumora-test.xml`. Recreate containers with the same `docker run`

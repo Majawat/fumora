@@ -25,6 +25,19 @@ login on the Settings page.
 | `UMASK` | 0002 | Permissions for files Fumora writes |
 | `FUMORA_PORT` | 8792 | Web port |
 | `FUMORA_CONFIG_DIR` | /config | Database and session key |
+| `FUMORA_TRUSTED_PROXIES` | 127.0.0.1 | Reverse proxies whose `X-Forwarded-*` headers are believed (comma-separated addresses or CIDR ranges) |
+
+### Behind a reverse proxy
+
+Fumora runs on its own subdomain (e.g. `comics.example.com`) behind a proxy such
+as Nginx Proxy Manager that ends https and forwards to `http://<host>:8792`.
+Set `FUMORA_TRUSTED_PROXIES` to the proxy's address so Fumora sees the
+visitor's address and https; until then the dashboard says that an untrusted
+proxy is in front. The proxy must pass the `Host` header through (NPM does).
+There is one admin account; after 5 wrong passwords from one address in 15
+minutes, logins from it wait 15 minutes. Form posts from other sites are
+refused (cross-site request forgery). Serving Fumora under a sub-path is not
+supported.
 
 ### Paths (TRaSH Guides layout)
 
