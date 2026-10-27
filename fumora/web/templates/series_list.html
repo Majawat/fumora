@@ -2,6 +2,7 @@
 {% block title %}Series · Fumora{% endblock %}
 {% block content %}
 <h1>Series</h1>
+{% if notice %}<p class="notice">{{ notice }}</p>{% endif %}
 <form class="row filters" method="get" action="/series">
   <input name="q" value="{{ q }}" placeholder="Filter by name" aria-label="Filter by name">
   <select name="match" aria-label="Match status">
@@ -13,21 +14,87 @@
   <button class="secondary">Filter</button>
 </form>
 <p class="muted">{{ rows|length }} series</p>
-<div class="scroll">
-<table class="log">
-  <thead><tr><th>Series</th><th>Type</th><th>Have</th><th>Metron</th></tr></thead>
-  <tbody>
-  {% for r in rows %}
-  {% set s = r.series %}
-  <tr>
-    <td><a href="/series/{{ s.id }}">{{ s.name }}{% if s.year_began %} ({{ s.year_began }}){% endif %}</a></td>
-    <td>{{ s.series_type or s.mylar_type or "" }}</td>
-    <td>{{ r.have }}/{{ r.total }}</td>
-    <td><span class="badge {{ s.match_status }}">{{ match_labels[s.match_status] }}</span>
-      {% if r.unmatched %}<small class="muted">{{ r.unmatched }} unmatched</small>{% endif %}</td>
-  </tr>
-  {% endfor %}
-  </tbody>
-</table>
-</div>
+<form method="post" action="/series/bulk-edit">
+  <input type="hidden" name="match" value="{{ match or '' }}">
+  <input type="hidden" name="q" value="{{ q }}">
+  <details class="card">
+    <summary>Edit selected</summary>
+    <div class="row">
+      <label>Monitored
+        <select name="monitored">
+          <option value="">No change</option>
+          <option value="on">Monitored</option>
+          <option value="off">Not monitored</option>
+        </select>
+      </label>
+      <label>Monitor new issues
+        <select name="monitor_new">
+          <option value="">No change</option>
+          <option value="on">On</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
+      <label>Monitoring option
+        <select name="monitor_option">
+          <option value="">No change</option>
+          {% for key, label in monitor_options.items() %}
+          <option value="{{ key }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Numbering
+        <select name="numbering">
+          <option value="">No change</option>
+          <option value="auto">Automatic</option>
+          <option value="issues">Issues</option>
+          <option value="volumes">Volumes</option>
+        </select>
+      </label>
+      <label>Reading direction
+        <select name="reading_direction">
+          <option value="">No change</option>
+          <option value="unknown">Unknown</option>
+          <option value="ltr">Left to right (ltr)</option>
+          <option value="rtl">Right to left (rtl)</option>
+        </select>
+      </label>
+      <label>Age rating
+        <select name="age_rating">
+          <option value="">No change</option>
+          <option value="calculated">Use calculated</option>
+          {% for r in ratings %}
+          <option value="{{ r }}">{{ r }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="row">
+      <label>Add tags
+        <input name="add_tags" placeholder="Comma-separated">
+      </label>
+      <label>Remove tags
+        <input name="remove_tags" placeholder="Comma-separated">
+      </label>
+      <button>Apply to selected</button>
+    </div>
+  </details>
+  <div class="scroll">
+  <table class="log">
+    <thead><tr><th><input type="checkbox" onclick="document.querySelectorAll('input[name=series_ids]').forEach(c => c.checked = this.checked)" aria-label="Select all shown"></th><th>Series</th><th>Type</th><th>Have</th><th>Metron</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+    {% set s = r.series %}
+    <tr>
+      <td><input type="checkbox" name="series_ids" value="{{ s.id }}" aria-label="{{ s.name }}"></td>
+      <td><a href="/series/{{ s.id }}">{{ s.name }}{% if s.year_began %} ({{ s.year_began }}){% endif %}</a></td>
+      <td>{{ s.series_type or s.mylar_type or "" }}</td>
+      <td>{{ r.have }}/{{ r.total }}</td>
+      <td><span class="badge {{ s.match_status }}">{{ match_labels[s.match_status] }}</span>
+        {% if r.unmatched %}<small class="muted">{{ r.unmatched }} unmatched</small>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</form>
 {% endblock %}

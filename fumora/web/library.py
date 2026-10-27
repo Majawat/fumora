@@ -1,6 +1,7 @@
 """Series pages and the Mylar import page."""
 
 from datetime import UTC, datetime
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -8,7 +9,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, selectinload
 
-from .. import annuals, naming, settings_store
+from .. import annuals, monitoring, naming, settings_store
 from ..import_job import KIND as MYLAR_IMPORT
 from ..importer import (
     apply_metron_series,
@@ -34,6 +35,32 @@ MATCH_LABELS = {
     "pending": "Not matched yet",
     "accepted": "Accepted, applying",
 }
+
+_BULK_MONITORED = {"on": True, "off": False}
+_BULK_MONITOR_NEW = {"on": True, "off": False}
+_BULK_NUMBERING = ("auto", "issues", "volumes")
+_BULK_READING_DIR = {"unknown": None, "ltr": "ltr", "rtl": "rtl"}
+_BULK_AGE_RATING = {"calculated": None, **{r: r for r in METRON_RATINGS}}
+
+
+def parse_tag_names(raw: str) -> list[str]:
+    wanted: list[str] = []
+    for name in (t.strip() for t in raw.split(",")):
+        if name and name.lower() not in {w.lower() for w in wanted}:
+            wanted.append(name[:100])
+    return wanted
+
+
+def resolve_tags(db: Session, raw: str) -> list[Tag]:
+    tags: list[Tag] = []
+    for name in parse_tag_names(raw):
+        tag = db.scalar(select(Tag).where(func.lower(Tag.name) == name.lower()))
+        if tag is None:
+            tag = Tag(name=name)
+            db.add(tag)
+            db.flush()
+        tags.append(tag)
+    return tags
 
 
 def _series_rows(db: Session, where=None, name_like: str | None = None, having_unmatched: bool = False):
@@ -61,17 +88,206 @@ def _series_rows(db: Session, where=None, name_like: str | None = None, having_u
 def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) -> None:
     templates.env.globals["match_labels"] = MATCH_LABELS
 
+    def _series_list_page(
+        request: Request,
+        db: Session,
+        match: str | None = None,
+        q: str | None = None,
+        notice: str | None = None,
+    ):
+        where = Series.match_status == match if match in MATCH_LABELS else None
+        rows = _series_rows(db, where, name_like=q)
+        return templates.TemplateResponse(
+            request,
+            "series_list.html",
+            {
+                "rows": rows,
+                "match": match,
+                "q": q or "",
+                "notice": notice,
+                "ratings": METRON_RATINGS,
+                "monitor_options": monitoring.OPTIONS,
+            },
+        )
+
     @app.get("/series", response_class=HTMLResponse)
     def series_list(
         request: Request, match: str | None = None, q: str | None = None, db: Session = Depends(get_db)
     ):
-        where = None
-        if match in MATCH_LABELS:
-            where = Series.match_status == match
-        rows = _series_rows(db, where, name_like=q)
-        return templates.TemplateResponse(
-            request, "series_list.html", {"rows": rows, "match": match, "q": q or ""}
-        )
+        return _series_list_page(request, db, match=match, q=q)
+
+    @app.post("/series/bulk-edit", response_class=HTMLResponse)
+    def series_bulk_edit(
+        request: Request,
+        series_ids: Annotated[list[str], Form()] = (),
+        monitored: str = Form(""),
+        monitor_new: str = Form(""),
+        monitor_option: str = Form(""),
+        numbering: str = Form(""),
+        reading_direction: str = Form(""),
+        age_rating: str = Form(""),
+        add_tags: str = Form(""),
+        remove_tags: str = Form(""),
+        match: str | None = Form(None),
+        q: str | None = Form(None),
+        db: Session = Depends(get_db),
+    ):
+        ids: list[int] = []
+        for raw_id in series_ids:
+            try:
+                sid = int(raw_id)
+            except ValueError as exc:
+                raise HTTPException(400, f"Invalid series_ids value: {raw_id!r}") from exc
+            if sid not in ids:
+                ids.append(sid)
+
+        for field, value, allowed in (
+            ("monitored", monitored, _BULK_MONITORED),
+            ("monitor_new", monitor_new, _BULK_MONITOR_NEW),
+            ("monitor_option", monitor_option, monitoring.OPTIONS),
+            ("numbering", numbering, _BULK_NUMBERING),
+            ("reading_direction", reading_direction, _BULK_READING_DIR),
+            ("age_rating", age_rating, _BULK_AGE_RATING),
+        ):
+            if value != "" and value not in allowed:
+                raise HTTPException(400, f"Invalid {field} value: {value!r}")
+
+        add_names = parse_tag_names(add_tags)
+        remove_names = parse_tag_names(remove_tags)
+        remove_by_lower = {n.lower(): n for n in remove_names}
+        overlap = [
+            f"{n} ({remove_by_lower[n.lower()]})" if n != remove_by_lower[n.lower()] else n
+            for n in add_names
+            if n.lower() in remove_by_lower
+        ]
+        if overlap:
+            raise HTTPException(400, f"Cannot both add and remove tag: {', '.join(overlap)}")
+
+        changes: list[str] = []
+        if monitor_option != "":
+            changes.append(f"monitoring set to {monitoring.OPTIONS[monitor_option]}")
+        if monitored != "":
+            changes.append(f"monitored {'on' if _BULK_MONITORED[monitored] else 'off'}")
+        if monitor_new != "":
+            changes.append(f"monitor new issues {'on' if _BULK_MONITOR_NEW[monitor_new] else 'off'}")
+        if numbering != "":
+            changes.append(f"numbering {numbering}")
+        if reading_direction != "":
+            rd = _BULK_READING_DIR[reading_direction]
+            changes.append(f"reading direction {rd or 'unknown'}")
+        if age_rating != "":
+            ar = _BULK_AGE_RATING[age_rating]
+            changes.append(f"age rating {ar or 'calculated'}")
+        if add_names:
+            changes.append(f"tags added: {', '.join(add_names)}")
+        if remove_names:
+            changes.append(f"tags removed: {', '.join(remove_names)}")
+
+        if not ids:
+            return _series_list_page(
+                request, db, match=match, q=q, notice="No series selected; nothing changed."
+            )
+        if not changes:
+            return _series_list_page(
+                request, db, match=match, q=q, notice="No changes selected; nothing changed."
+            )
+
+        found_by_id = {
+            s.id: s
+            for s in db.scalars(
+                select(Series)
+                .where(Series.id.in_(ids))
+                .options(
+                    selectinload(Series.issues).selectinload(Issue.files),
+                    selectinload(Series.tags),
+                )
+            ).all()
+        }
+        found = [found_by_id[sid] for sid in ids if sid in found_by_id]
+        missing_ids = [sid for sid in ids if sid not in found_by_id]
+        changed = 0
+
+        if found:
+            tags_to_add = resolve_tags(db, add_tags) if add_names else []
+            remove_lower = set(remove_by_lower)
+
+            for s in found:
+                s_changes: list[str] = []
+                non_monitor_changed = False
+                old_monitored = s.monitored
+                old_issues = {i.id: i.monitored for i in s.issues}
+
+                if monitor_option != "":
+                    monitoring.apply_option(s, monitor_option)
+                if monitored != "":
+                    s.monitored = _BULK_MONITORED[monitored]
+
+                if monitor_option != "" and (
+                    (monitored == "" and s.monitored != old_monitored)
+                    or any(i.monitored != old_issues[i.id] for i in s.issues)
+                ):
+                    s_changes.append(f"monitoring set to {monitoring.OPTIONS[monitor_option]}")
+                if monitored != "" and s.monitored != old_monitored:
+                    s_changes.append(f"monitored {'on' if s.monitored else 'off'}")
+
+                if monitor_new != "":
+                    val = _BULK_MONITOR_NEW[monitor_new]
+                    if s.monitor_new != val:
+                        s.monitor_new = val
+                        s_changes.append(f"monitor new issues {'on' if val else 'off'}")
+                if numbering != "" and s.numbering != numbering:
+                    s.numbering = numbering
+                    s_changes.append(f"numbering {numbering}")
+                    non_monitor_changed = True
+                if reading_direction != "":
+                    rd = _BULK_READING_DIR[reading_direction]
+                    if s.reading_direction != rd:
+                        s.reading_direction = rd
+                        s_changes.append(f"reading direction {rd or 'unknown'}")
+                        non_monitor_changed = True
+                if age_rating != "":
+                    ar = _BULK_AGE_RATING[age_rating]
+                    if s.age_rating_override != ar:
+                        s.age_rating_override = ar
+                        s_changes.append(f"age rating {ar or 'calculated'}")
+                        non_monitor_changed = True
+                if tags_to_add:
+                    existing = {t.name.lower() for t in s.tags}
+                    added: list[str] = []
+                    for tag in tags_to_add:
+                        if tag.name.lower() not in existing:
+                            s.tags.append(tag)
+                            existing.add(tag.name.lower())
+                            added.append(tag.name)
+                    if added:
+                        s_changes.append(f"tags added: {', '.join(added)}")
+                        non_monitor_changed = True
+                if remove_lower:
+                    by_lower = {t.name.lower(): t.name for t in s.tags}
+                    removed = [by_lower[n.lower()] for n in remove_names if n.lower() in by_lower]
+                    if removed:
+                        s.tags = [t for t in s.tags if t.name.lower() not in remove_lower]
+                        s_changes.append(f"tags removed: {', '.join(removed)}")
+                        non_monitor_changed = True
+
+                if s_changes:
+                    changed += 1
+                    log(
+                        db,
+                        f"'{s.name}': {', '.join(s_changes)}",
+                        kind="series" if non_monitor_changed else "monitor",
+                        series_id=s.id,
+                    )
+
+            db.commit()
+
+        unchanged = len(found) - changed
+        notice = f"Changed {changed} series: {', '.join(changes)}."
+        if unchanged:
+            notice += f" {unchanged} already had these settings."
+        if missing_ids:
+            notice += f" Not found: {', '.join(str(i) for i in missing_ids)}."
+        return _series_list_page(request, db, match=match, q=q, notice=notice)
 
     def detail_context(db: Session, series: Series, error: str | None = None, rename: bool = False) -> dict:
         issues = sorted(series.issues, key=lambda i: (i.sort_number is None, i.sort_number or 0, i.number))
@@ -159,18 +375,7 @@ def register_library_routes(app: FastAPI, templates: Jinja2Templates, get_db) ->
         series.reading_direction = reading_direction if reading_direction in ("ltr", "rtl") else None
         series.numbering = numbering if numbering in ("auto", "issues", "volumes") else "auto"
         series.age_rating_override = age_rating if age_rating in METRON_RATINGS else None
-        wanted = []
-        for name in (t.strip() for t in tags.split(",")):
-            if name and name.lower() not in {w.lower() for w in wanted}:
-                wanted.append(name[:100])
-        new_tags = []
-        for name in wanted:
-            tag = db.scalar(select(Tag).where(func.lower(Tag.name) == name.lower()))
-            if tag is None:
-                tag = Tag(name=name)
-                db.add(tag)
-            new_tags.append(tag)
-        series.tags = new_tags
+        series.tags = resolve_tags(db, tags)
         db.commit()
         return RedirectResponse(f"/series/{series_id}", status_code=303)
 

@@ -35,6 +35,7 @@ Jinja2 + htmx. Image: `ghcr.io/majawat/fumora:edge` (built from `main`).
 | 0.5.2: parser packs of volumes / year volumes / variants (#16), downloads converted straight into the library (#31), live Shelfmark test fixes (#7) | merged 2026-10-23, tagged v0.5.2 | #33 |
 | 0.6.0 Sonarr/Mylar parity: delete series + optional recycle folder, History, Blocklist, database backups/restore, RSS sync, annuals linked to their series, story arcs as reading lists (.cbl) + release-name parser rules (live workflow, Mylar comparison, local-model labelling) | merged 2026-10-23, tagged v0.6.0 | #34 |
 | 0.6.1 reverse proxy (#8; owner 2026-10-26: own subdomain, one admin, /setup open until the admin exists is fine): trusted proxies (`FUMORA_TRUSTED_PROXIES`), untrusted-proxy dashboard notice, cross-site request guard, Secure cookie over https, login lockout per address | branch `reverse-proxy` | — |
+| 0.6.2 bulk series editor (Series page: tick series, change monitored / monitor new / monitoring option / numbering / reading direction / age rating / add+remove tags; history only for series that really changed). First task written by Gemini 4 Argon High via agy (brief + one review round), reviewed by Claude | branch `bulk-series-editor` | — |
 | M5 rest: TPBs (a TPB is its own series, grabbed only when that series is added and monitored; never counts as the single issues it collects), GCD ratings via the GCD API (needs the owner's GCD account), manual series, split/join, notifications (back burner) | not started | — |
 | M6 side-by-side week with Mylar, cut over (1.0.0) | not started | — |
 | Back burner (owner, 2026-10-23): bulk series editor, quality upgrades (scan -> digital), API with a key (e.g. for Requinsta), Logs page, notifications, ISBN search for TPBs | — | — |
@@ -202,6 +203,16 @@ run headless by Claude on Bastet:
 4. Before a production release, the owner also runs `/code-review ultra`.
 
 First run (PR #29, 2026-10-21): 6 findings, all real, all fixed.
+
+**Gemini as coder** (trial 2026-10-27, bulk series editor): `git archive` export of main into
+`~/claude/fumora-gemini` with its own baseline git commit (for diffs) and `.venv`; agy `settings.json` allows
+`read_file`/`write_file` for that folder and `command(.venv/bin/pytest)` / `command(.venv/bin/ruff)` only.
+Brief in `GEMINI_TASK.md` (files to read, exact fields/rules, tests that must fail without the feature, write
+`GEMINI_NOTES.md`); run `agy -p "Read GEMINI_TASK.md ... do the task" --model gemini-4-argon-high --sandbox
+--output-format json`. Result: 11.5 min, everything built, its claims true, its tests caught 5/5 deliberate
+breaks; my review found 4 small issues, which it fixed in a second run (7 min, tests caught 3/3). Then
+Claude ports the files to a branch here. Good for contained, offline-testable features; keep file writes,
+Metron, security and migrations with Claude.
 
 **Full audit** (once per milestone and before a production release): six area briefs (file safety,
 downloads, metadata, web/security, structure, tests) in `.audit/` of a plain `git archive` export
