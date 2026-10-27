@@ -1,6 +1,6 @@
 # Fumora — handoff
 
-State as of 2026-10-26. Read this, `CLAUDE.md` (coding rules) and the design doc
+State as of 2026-10-27. Read this, `CLAUDE.md` (coding rules) and the design doc
 (link in `docs/DESIGN.md`) before continuing.
 
 ## What Fumora is
@@ -275,7 +275,7 @@ Files record the version in their `<Notes>` ("Tagged by Fumora 0.5.0").
 | Container | Port | Image | Notes |
 | --- | --- | --- | --- |
 | `fumora` (production) | 8792 | `ghcr.io/majawat/fumora:edge` | `/data` mounted **read-only**; scheduler on (daily Metron refresh 05:00 UTC) |
-| `fumora-test` | 8793 | local `fumora:proxy` (branch `reverse-proxy`), `FUMORA_TRUSTED_PROXIES=192.168.9.5` | `FUMORA_SCHEDULER=0`; writable only `/data/media/comics-test` and `/data/usenet` (downloads + `fumora-test-library`) |
+| `fumora-test` | 8793 | local `fumora:bulk` (branch `bulk-series-editor`, 0.6.2), `FUMORA_TRUSTED_PROXIES=192.168.9.5` | `FUMORA_SCHEDULER=0`; writable only `/data/media/comics-test` and `/data/usenet` (downloads + `fumora-test-library`) |
 
 Unraid templates: `/boot/config/plugins/dockerMan/templates-user/my-fumora.xml`
 and `my-fumora-test.xml`. Recreate containers with the same `docker run`
@@ -310,6 +310,23 @@ Production DB backups before migrations:
 - First library-wide tag preview (~8,100 Metron requests, ~2 days) waits for
   the owner to finish confirming; the real write needs `/data` read-write and
   should run overnight.
+
+## Next steps (2026-10-27)
+
+1. **Bulk editor PR:** branch `bulk-series-editor` (0.6.2) pushed, tests green locally, on fumora-test. No PR
+   yet: ask the owner before opening/merging (each merge needs the owner's OK). After a merge, check the PR
+   really merged before tagging (`gh pr merge` once failed with a GraphQL error; a tag on old main started a
+   release run Claude's token cannot cancel).
+2. **Production still on 0.6.0** (`fumora`, ghcr :edge, started before 0.6.1). Moving it: recreate from the
+   Unraid template with `FUMORA_TRUSTED_PROXIES=192.168.9.5` added, check the Metron API token in Settings.
+   `/data` stays read-only until the owner says otherwise.
+3. **External access:** no NPM proxy host / DNS for Fumora's subdomain yet: outward-facing, owner's call
+   (owner uses subdomains, not sub-paths).
+4. **Gemini stress test proposed (owner interested, not started):** manual series (source `manual`: model +
+   migration, create/edit pages for series and issues, refresh skips them, Wanted/Missing, search/import,
+   tag writer on test copies only), written by Gemini per "Gemini as coder". Owner condition: no real money;
+   agy uses the AI Pro quota; stop the trial if the quota runs out. Then the rest of M5 (TPB fallback has
+   open design questions), then M6.
 
 ## Open issues worth knowing
 
